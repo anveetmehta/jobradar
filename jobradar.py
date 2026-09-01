@@ -29,7 +29,7 @@ import sys
 import time
 import webbrowser
 from concurrent.futures import ThreadPoolExecutor
-from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 HERE = Path(__file__).parent
@@ -444,8 +444,8 @@ def cmd_watch(args):
 
 def cmd_serve(args):
     os.chdir(HERE)
-    handler = SimpleHTTPRequestHandler
-    with ThreadingHTTPServer(("localhost", args.port), handler) as httpd:
+    import webapp  # local import: webapp imports this module back, safe once main() is running
+    with ThreadingHTTPServer(("localhost", args.port), webapp.Handler) as httpd:
         url = f"http://localhost:{args.port}/web/index.html"
         print(f"Serving jobradar at {url}  (Ctrl+C to stop)")
         try:

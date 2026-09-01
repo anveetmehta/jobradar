@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>jobradar — set up</title>
+<style>
+  :root {
+    --bg:#f7f7f5; --panel:#ffffff; --ink:#1a1a1a; --muted:#6b6b6b; --line:#e4e4e0;
+    --accent:#2563eb; --accent-ink:#fff; --danger:#b91c1c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#15161a; --panel:#1e1f24; --ink:#eaeaea; --muted:#9a9a9a; --line:#2c2d33;
+            --accent:#7aa2ff; --accent-ink:#0c1220; --danger:#f87171; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; }
+  header { padding: 20px 24px 8px; }
+  h1 { font-size: 18px; margin: 0 0 2px; }
+  .sub { color: var(--muted); font-size: 13px; }
+  main { max-width: 680px; margin: 0 auto; padding: 8px 24px 80px; }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+            padding: 16px 18px; margin: 16px 0; }
+  section h2 { font-size: 14px; margin: 0 0 4px; }
+  section p.hint { color: var(--muted); font-size: 12px; margin: 0 0 12px; }
+  label { display:block; font-size: 12.5px; font-weight: 600; margin: 12px 0 4px; }
+  label .opt { font-weight: 400; color: var(--muted); }
+  input[type=text], input[type=number], input[type=email], textarea, select {
+    width: 100%; background: var(--bg); color: var(--ink); border: 1px solid var(--line);
+    border-radius: 6px; padding: 8px 10px; font-size: 13.5px; font-family: inherit;
+  }
+  textarea { resize: vertical; min-height: 54px; }
+  .row { display:grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .row3 { display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+  .exp-block { border: 1px dashed var(--line); border-radius: 8px; padding: 12px; margin: 10px 0; }
+  .exp-block .row3 { grid-template-columns: 2fr 2fr 1fr; }
+  button { cursor: pointer; border: none; border-radius: 7px; font-size: 13px; font-weight: 600;
+           padding: 8px 14px; }
+  .btn-add { background: transparent; border: 1px solid var(--line); color: var(--ink); }
+  .btn-remove { background: transparent; border: 1px solid var(--danger); color: var(--danger);
+                font-size: 11px; padding: 4px 8px; float: right; }
+  .btn-primary { background: var(--accent); color: var(--accent-ink); width: 100%;
+                 padding: 12px; font-size: 14px; margin-top: 6px; }
+  .btn-primary:disabled { opacity: .5; cursor: default; }
+  .status { font-size: 13px; margin-top: 10px; }
+  .status.err { color: var(--danger); }
+  .status.ok { color: var(--accent); }
+  .model-hint { font-size: 11.5px; color: var(--muted); margin-top: 3px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Set up jobradar</h1>
+  <div class="sub">This writes config.json + profile.json on your machine. Nothing here is sent anywhere yet — it's only used later when you run a scan or ask for a tailored resume.</div>
+</header>
+<main>
+  <form id="f">
+
+    <section>
+      <h2>Who you are</h2>
+      <p class="hint">Used to fill the header of any resume/cover letter you generate. Never sent to an AI backend.</p>
+      <label>Full name</label>
+      <input type="text" name="name" required>
+      <div class="row">
+        <div><label>Location</label><input type="text" name="c_location" placeholder="Bengaluru, India"></div>
+        <div><label>Email</label><input type="email" name="c_email"></div>
+      </div>
+      <div class="row">
+        <div><label>Phone <span class="opt">optional</span></label><input type="text" name="c_phone"></div>
+        <div><label>LinkedIn <span class="opt">optional</span></label><input type="text" name="c_linkedin" placeholder="linkedin.com/in/you"></div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Your background</h2>
+      <p class="hint">This is what gets matched against job postings and what your resume is built from. Be specific — a thin profile gets thin matches.</p>
+      <label>Headline</label>
+      <input type="text" name="headline" placeholder="Senior Product Manager — Payments & Identity Platforms" required>
+      <div class="row">
+        <div><label>Years of experience</label><input type="number" name="years_experience" min="0" max="60" required></div>
+        <div><label>Skills <span class="opt">comma separated</span></label><input type="text" name="skills" placeholder="payments, kyc, api, sql" required></div>
+      </div>
+      <label>Summary</label>
+      <textarea name="summary" required placeholder="3-4 sentences on what you've built and owned."></textarea>
+
+      <label style="margin-top:16px">Experience</label>
+      <div id="exp-list"></div>
+      <button type="button" class="btn-add" id="add-exp">+ Add role</button>
+
+      <label>Education <span class="opt">one per line</span></label>
+      <textarea name="education" placeholder="MBA, Business Analytics — Your University"></textarea>
+      <label>Certifications <span class="opt">optional, one per line</span></label>
+      <textarea name="certifications"></textarea>
+      <label>Notes for the AI <span class="opt">optional — dealbreakers, seniority preference, etc.</span></label>
+      <textarea name="notes_for_ai"></textarea>
+    </section>
+
+    <section>
+      <h2>What you're looking for</h2>
+      <label>Job titles <span class="opt">comma separated — postings must match one of these</span></label>
+      <input type="text" name="title_include" placeholder="product manager, group product manager" required>
+      <label>Location <span class="opt">comma separated — city names, or leave blank for anywhere</span></label>
+      <input type="text" name="location_filter" placeholder="bengaluru, bangalore">
+      <label>Target companies <span class="opt">comma separated — pinned to the top of every scan, and watched by `jobradar.py watch`</span></label>
+      <input type="text" name="target_companies" placeholder="Stripe, Razorpay, Airwallex">
+    </section>
+
+    <section>
+      <h2>AI backend</h2>
+      <p class="hint">Ollama is free and runs on your machine. Anthropic/OpenAI need an API key set as an environment variable (never entered here).</p>
+      <div class="row">
+        <div>
+          <label>Backend</label>
+          <select name="ai_backend" id="ai_backend">
+            <option value="ollama">Ollama (free, local)</option>
+            <option value="anthropic">Anthropic (Claude)</option>
+            <option value="openai">OpenAI (GPT)</option>
+          </select>
+        </div>
+        <div>
+          <label>Model</label>
+          <input type="text" name="ai_model" id="ai_model" value="mistral-nemo">
+          <div class="model-hint" id="model-hint">Needs `ollama pull mistral-nemo` first. Other good options: qwen2.5:7b, llama3.1:8b, gemma2:9b.</div>
+        </div>
+      </div>
+    </section>
+
+    <button type="submit" class="btn-primary" id="submit">Save and continue</button>
+    <div class="status" id="status"></div>
+  </form>
+</main>
+<script>
+const expList = document.getElementById('exp-list');
+function addExp(vals = {}) {
+  const div = document.createElement('div');
+  div.className = 'exp-block';
+  div.innerHTML = `
+    <button type="button" class="btn-remove">remove</button>
+    <div class="row3">
+      <div><label>Company</label><input type="text" class="exp-company" value="${vals.company||''}"></div>
+      <div><label>Title</label><input type="text" class="exp-title" value="${vals.title||''}"></div>
+      <div><label>Dates</label><input type="text" class="exp-dates" placeholder="2023-06 to Present" value="${vals.dates||''}"></div>
+    </div>
+    <label>Highlights <span class="opt">one per line — these are what a resume is built from</span></label>
+    <textarea class="exp-highlights" rows="3">${(vals.highlights||[]).join('\n')}</textarea>
+  `;
+  div.querySelector('.btn-remove').onclick = () => div.remove();
+  expList.appendChild(div);
+}
+document.getElementById('add-exp').onclick = () => addExp();
+addExp(); // start with one
+
+const modelDefaults = {
+  ollama: ['mistral-nemo', 'Needs `ollama pull mistral-nemo` first. Other good options: qwen2.5:7b, llama3.1:8b, gemma2:9b.'],
+  anthropic: ['claude-sonnet-5', 'Needs ANTHROPIC_API_KEY set in your shell environment.'],
+  openai: ['gpt-5', 'Needs OPENAI_API_KEY set in your shell environment.'],
+};
+document.getElementById('ai_backend').addEventListener('change', (e) => {
+  const [model, hint] = modelDefaults[e.target.value];
+  document.getElementById('ai_model').value = model;
+  document.getElementById('model-hint').textContent = hint;
+});
+
+function splitLines(name) {
+  return (document.querySelector(`[name=${name}]`).value || '').split('\n').map(s => s.trim()).filter(Boolean);
+}
+function splitCommas(name) {
+  return (document.querySelector(`[name=${name}]`).value || '').split(',').map(s => s.trim()).filter(Boolean);
+}
+
+document.getElementById('f').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = document.getElementById('submit');
+  const status = document.getElementById('status');
+  btn.disabled = true;
+  status.textContent = 'Saving...';
+  status.className = 'status';
+
+  const experience = [...expList.children].map(div => ({
+    company: div.querySelector('.exp-company').value,
+    title: div.querySelector('.exp-title').value,
+    start: div.querySelector('.exp-dates').value.split(' to ')[0] || '',
+    end: div.querySelector('.exp-dates').value.split(' to ')[1] || 'Present',
+    highlights: div.querySelector('.exp-highlights').value.split('\n').map(s => s.trim()).filter(Boolean),
+  })).filter(e => e.company && e.title);
+
+  const payload = {
+    name: document.querySelector('[name=name]').value,
+    contact: {
+      location: document.querySelector('[name=c_location]').value,
+      email: document.querySelector('[name=c_email]').value,
+      phone: document.querySelector('[name=c_phone]').value,
+      linkedin: document.querySelector('[name=c_linkedin]').value,
+    },
+    headline: document.querySelector('[name=headline]').value,
+    years_experience: Number(document.querySelector('[name=years_experience]').value) || 0,
+    summary: document.querySelector('[name=summary]').value,
+    skills: splitCommas('skills'),
+    experience,
+    education: splitLines('education'),
+    certifications: splitLines('certifications'),
+    notes_for_ai: document.querySelector('[name=notes_for_ai]').value,
+    title_include: splitCommas('title_include'),
+    location_filter: splitCommas('location_filter'),
+    target_companies: splitCommas('target_companies'),
+    ai_backend: document.getElementById('ai_backend').value,
+    ai_model: document.getElementById('ai_model').value,
+  };
+
+  try {
+    const res = await fetch('/api/setup', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || 'save failed');
+    status.className = 'status ok';
+    status.textContent = data.note ? `Saved. ${data.note}` : 'Saved. Redirecting...';
+    setTimeout(() => { window.location.href = 'index.html'; }, data.note ? 2200 : 600);
+  } catch (err) {
+    status.className = 'status err';
+    status.textContent = 'Could not save: ' + err.message;
+    btn.disabled = false;
+  }
+});
+</script>
+</body>
+</html>

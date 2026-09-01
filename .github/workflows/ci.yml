@@ -13,15 +13,32 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: pip install -r requirements.txt
       - name: compile check
-        run: python -m py_compile jobradar.py match.py resume.py render.py fit.py pdf.py notify.py sources/*.py
+        run: python -m py_compile jobradar.py match.py resume.py render.py fit.py pdf.py notify.py webapp.py sources/*.py
       - name: example config/profile are valid JSON
         run: |
           python -c "import json; json.load(open('examples/config.example.json'))"
           python -c "import json; json.load(open('examples/profile.example.json'))"
+      - name: web UI reports unconfigured before init
+        run: |
+          python jobradar.py serve --port 8765 & echo $! > /tmp/serve.pid
+          sleep 2
+          out=$(curl -sf http://localhost:8765/api/config)
+          echo "$out"
+          echo "$out" | grep -q '"configured": false' \
+            || (echo "expected configured:false on a clean checkout"; kill $(cat /tmp/serve.pid); exit 1)
+          kill $(cat /tmp/serve.pid)
       - name: init works from a clean checkout
         run: |
           python jobradar.py init
           test -f config.json && test -f profile.json
+      - name: web UI reports configured after init, serves the setup + main pages
+        run: |
+          python jobradar.py serve --port 8765 & echo $! > /tmp/serve.pid
+          sleep 2
+          curl -sf http://localhost:8765/api/config | grep -q '"configured": true'
+          curl -sf -o /dev/null http://localhost:8765/web/setup.html
+          curl -sf -o /dev/null http://localhost:8765/web/index.html
+          kill $(cat /tmp/serve.pid)
       - name: verify reaches the configured ATS boards
         run: python jobradar.py verify
       - name: fast scan runs end-to-end without an AI backend
@@ -37,3 +54,14 @@ jobs:
             || (echo "expected the controlled error message, got a traceback or something else"; exit 1)
       - name: watch --once completes without crashing (no AI backend, real target-company boards)
         run: python jobradar.py watch --once
+      - name: /api/tailor fails as a clean JSON error, not a server crash, with no AI backend up
+        run: |
+          python jobradar.py serve --port 8765 & echo $! > /tmp/serve.pid
+          sleep 2
+          job=$(python -c "import json; print(json.dumps({'job': json.load(open('data/results.json'))['jobs'][0]}))")
+          out=$(curl -sf -X POST -H 'Content-Type: application/json' -d "$job" http://localhost:8765/api/tailor)
+          echo "$out"
+          echo "$out" | grep -qi '"error"' \
+            || (echo "expected a JSON error field, got something else"; kill $(cat /tmp/serve.pid); exit 1)
+          curl -sf -o /dev/null http://localhost:8765/api/config  # server still alive, didn't crash
+          kill $(cat /tmp/serve.pid)

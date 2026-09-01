@@ -40,20 +40,36 @@ git clone https://github.com/anveetmehta/jobradar.git
 cd jobradar
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 
-.venv/bin/python jobradar.py init      # creates config.json + profile.json from the examples
-# now edit config.json (location, target companies, AI backend)
-#      and profile.json (your real background — see "Your profile" below)
+.venv/bin/python jobradar.py serve     # opens http://localhost:8765
+```
 
+The first time you open it with no `config.json`/`profile.json` present, it
+redirects to a setup page — your background, the job titles and companies
+you want, and your AI backend, all as a form. Submitting it writes
+`config.json` + `profile.json` for you; nothing here is sent anywhere until
+you run a scan or ask for a tailored resume. Both files are gitignored —
+your job search is never committed, even if you fork this repo.
+
+Once set up, generate your first ranked list and browse it in the same page:
+
+```bash
 .venv/bin/python jobradar.py verify    # sanity-check your ATS company list
 .venv/bin/python jobradar.py scan      # fetch + AI-score + rank -> data/results.json
-.venv/bin/python jobradar.py serve     # opens http://localhost:8765 with the ranked list
+```
 
+Reload the browser tab — each result has a **Tailor resume & cover letter**
+button that generates both in-browser, verified to one page, with a link to
+open each. `scan` and `watch` stay command-line/cron operations on purpose
+(a real AI-scored scan takes minutes — a bad fit for a page waiting on one
+HTTP response), everything else — setup, browsing, tailoring — happens in
+the UI. The CLI equivalents still work if you prefer them or want to script this:
+
+```bash
+.venv/bin/python jobradar.py init      # creates config.json + profile.json from the examples,
+                                        # if you'd rather hand-edit JSON than use the setup page
 .venv/bin/python jobradar.py tailor 3  # one-page resume + cover letter for result #3
 .venv/bin/python jobradar.py watch     # radar: alert + auto-tailor on new target-company roles
 ```
-
-`config.json` and `profile.json` are gitignored — they hold your job search
-and are never committed, even if you fork this repo.
 
 ## Choosing an AI backend
 
@@ -86,15 +102,25 @@ a keyword-prescreen rank for that one posting rather than crashing the run
 
 ## Your profile
 
-`profile.json` is a JSON description of your real background — headline,
-years of experience, skills, work history with concrete highlights, and any
-free-text notes you want the AI to weigh (dealbreakers, seniority
-preference, "flag it if the role wants N+ years more than I have"). See
-`examples/profile.example.json` for the schema. **The match quality is only
-as honest as what you put here** — the model is instructed not to invent
-anything beyond it, so a thin profile produces thin, low-confidence scoring.
+Filled in via the setup page (`serve` redirects there until it exists), or
+hand-edited: `profile.json` is a JSON description of your real background —
+headline, years of experience, skills, work history with concrete
+highlights, and any free-text notes you want the AI to weigh (dealbreakers,
+seniority preference, "flag it if the role wants N+ years more than I
+have"). See `examples/profile.example.json` for the schema if editing by
+hand. **The match quality is only as honest as what you put here** — the
+model is instructed not to invent anything beyond it, so a thin profile
+produces thin, low-confidence scoring.
 
 ## Tailoring a resume and cover letter
+
+Click **Tailor resume & cover letter** on any card in the web UI — this is
+the normal way to do it. It calls the same pipeline described below through
+a local API (`/api/tailor`) and drops links to the generated files right on
+the card, along with any warnings.
+
+The CLI version is equivalent, useful for scripting or if you'd rather not
+use the browser:
 
 ```bash
 jobradar.py tailor 3                 # tailor for result #3 from your last `scan`

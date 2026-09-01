@@ -7,11 +7,11 @@
 <style>
   :root {
     --bg:#f7f7f5; --panel:#ffffff; --ink:#1a1a1a; --muted:#6b6b6b; --line:#e4e4e0;
-    --accent:#2563eb; --good:#16803c; --ok:#a16207; --weak:#b91c1c; --chip:#eef0ff;
+    --accent:#2563eb; --accent-ink:#fff; --good:#16803c; --ok:#a16207; --weak:#b91c1c; --chip:#eef0ff;
   }
   @media (prefers-color-scheme: dark) {
     :root { --bg:#15161a; --panel:#1e1f24; --ink:#eaeaea; --muted:#9a9a9a; --line:#2c2d33;
-            --accent:#7aa2ff; --good:#4ade80; --ok:#facc15; --weak:#f87171; --chip:#26283a; }
+            --accent:#7aa2ff; --accent-ink:#0c1220; --good:#4ade80; --ok:#facc15; --weak:#f87171; --chip:#26283a; }
   }
   * { box-sizing: border-box; }
   body { margin:0; background:var(--bg); color:var(--ink);
@@ -20,6 +20,10 @@
            display:flex; align-items:baseline; gap:14px; flex-wrap:wrap; }
   h1 { font-size: 17px; margin: 0; letter-spacing: .02em; }
   #meta { color: var(--muted); font-size: 12.5px; }
+  header a.edit { margin-left: auto; font-size: 12.5px; color: var(--accent); text-decoration: none; }
+  #legend { padding: 8px 24px; font-size: 12px; color: var(--muted); background: var(--panel);
+            border-bottom: 1px solid var(--line); }
+  #legend b { color: var(--ink); }
   #controls { padding: 12px 24px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;
               border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top:0; }
   input, select { background: var(--bg); color: var(--ink); border: 1px solid var(--line);
@@ -35,7 +39,7 @@
            min-width: 40px; text-align:right; }
   .score.strong, .score.good { color: var(--good); }
   .score.possible, .score.ok { color: var(--ok); }
-  .score.weak, .score.poor { color: var(--weak); }
+  .score.weak, .score.poor, .score.unscored { color: var(--weak); }
   .badge { display:inline-block; font-size: 10.5px; font-weight: 700; letter-spacing: .03em;
            background: var(--chip); color: var(--accent); border-radius: 5px;
            padding: 2px 6px; margin-left: 6px; vertical-align: 1px; }
@@ -44,17 +48,33 @@
   .gaps { margin-top: 6px; font-size: 12.5px; color: var(--weak); }
   .gaps ul { margin: 3px 0 0; padding-left: 18px; }
   .err { color: var(--muted); font-style: italic; font-size: 12.5px; margin-top: 6px; }
-  a.apply { display:inline-block; margin-top: 9px; font-size: 12.5px; color: var(--accent);
-            text-decoration: none; }
+  .actions { margin-top: 10px; display:flex; gap: 14px; align-items:center; flex-wrap: wrap; }
+  a.apply { font-size: 12.5px; color: var(--accent); text-decoration: none; }
   a.apply:hover { text-decoration: underline; }
+  button.tailor { background: var(--accent); color: var(--accent-ink); border: none;
+                  border-radius: 6px; font-size: 12.5px; font-weight: 600; padding: 6px 11px;
+                  cursor: pointer; }
+  button.tailor:disabled { opacity: .55; cursor: default; }
+  .tailor-result { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line);
+                    font-size: 12.5px; }
+  .tailor-result a { color: var(--accent); margin-right: 14px; }
+  .tailor-warn { color: var(--ok); margin-top: 4px; }
+  .tailor-flag { color: var(--weak); margin-top: 4px; }
   #empty { color: var(--muted); padding: 40px 0; text-align:center; }
+  #setup-needed, #scan-needed { max-width: 560px; margin: 60px auto; text-align:center;
+                                 color: var(--muted); font-size: 14px; line-height: 1.6; }
+  #setup-needed a, #scan-needed code { color: var(--accent); }
+  #scan-needed code { background: var(--panel); border: 1px solid var(--line); border-radius: 5px;
+                       padding: 2px 6px; }
 </style>
 </head>
 <body>
 <header>
   <h1>jobradar</h1>
   <span id="meta">loading…</span>
+  <a class="edit" href="setup.html">edit setup</a>
 </header>
+<div id="legend"><b>Score</b>: 0–100, how well the AI judges you fit this specific posting — read the line under each card for why. A <b>~</b> before the number means it was never AI-reviewed (you ran <code>scan --fast</code> or the AI call failed) — treat it as a rough keyword guess only.</div>
 <div id="controls">
   <input id="search" type="text" placeholder="Filter by title or company…">
   <select id="minScore">
@@ -68,25 +88,89 @@
     <option value="1">Target companies only</option>
   </select>
 </div>
-<main><div id="list"></div><div id="empty" style="display:none">No results match these filters.</div></main>
+<main>
+  <div id="list"></div>
+  <div id="empty" style="display:none">No results match these filters.</div>
+</main>
 <script>
+function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+async function boot() {
+  let cfg;
+  try {
+    cfg = await (await fetch('/api/config')).json();
+  } catch (e) {
+    document.getElementById('meta').textContent = 'Could not reach the jobradar server.';
+    return;
+  }
+  if (!cfg.configured) {
+    window.location.href = 'setup.html';
+    return;
+  }
+  document.getElementById('meta').textContent = cfg.summary.headline || '';
+  load();
+}
+
 async function load() {
   let data;
   try {
     const res = await fetch('../data/results.json', { cache: 'no-store' });
+    if (!res.ok) throw new Error('no results yet');
     data = await res.json();
   } catch (e) {
-    document.getElementById('meta').textContent = 'Could not load data/results.json — run `python3 jobradar.py scan` first.';
+    document.getElementById('legend').style.display = 'none';
+    document.getElementById('controls').style.display = 'none';
+    document.getElementById('list').innerHTML = `<div id="scan-needed">
+      You're set up, but there's nothing to show yet.<br><br>
+      Run <code>python3 jobradar.py scan</code> in a terminal, then reload this page.
+      A first run downloads a large index and can take a few minutes — after that it's fast.
+    </div>`;
     return;
   }
   render(data);
 }
 
 function verdictClass(j) {
+  if (j.ai_score == null) return 'unscored';
   if (j.ai_verdict) return j.ai_verdict;
   if (j.rank_score >= 80) return 'strong';
   if (j.rank_score >= 55) return 'possible';
   return 'weak';
+}
+
+async function tailor(job, btn, resultEl) {
+  btn.disabled = true;
+  btn.textContent = 'Tailoring… (~1 min)';
+  resultEl.innerHTML = '';
+  try {
+    const res = await fetch('/api/tailor', { method: 'POST', headers: {'Content-Type':'application/json'},
+                                             body: JSON.stringify({ job }) });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || 'failed');
+    let html = `<div class="tailor-result">`;
+    html += `<a href="${esc(data.resume_url)}" target="_blank">Resume (${data.resume_pages || '?'} page)</a>`;
+    if (data.cover_letter_url) {
+      html += `<a href="${esc(data.cover_letter_url)}" target="_blank">Cover letter (${data.cover_letter_pages || '?'} page)</a>`;
+    }
+    for (const w of [...(data.resume_warnings||[]), ...(data.cover_letter_warnings||[])]) {
+      html += `<div class="tailor-warn">${esc(w)}</div>`;
+    }
+    if (data.removed_skills && data.removed_skills.length) {
+      html += `<div class="tailor-flag">Removed skill(s) the model invented, not in your profile: ${esc(data.removed_skills.join(', '))}</div>`;
+    }
+    for (const c of (data.claim_flags||[])) {
+      html += `<div class="tailor-flag">Check before sending — possibly unverified claim: "${esc(c)}"</div>`;
+    }
+    if (data.unmet_requirements && data.unmet_requirements.length) {
+      html += `<div class="tailor-flag">This posting asks for things your profile doesn't support: ${esc(data.unmet_requirements.join('; '))}</div>`;
+    }
+    html += `</div>`;
+    resultEl.innerHTML = html;
+  } catch (e) {
+    resultEl.innerHTML = `<div class="tailor-result tailor-flag">Could not generate: ${esc(e.message)}. Check your AI backend (Ollama running? API key set?) in setup.</div>`;
+  }
+  btn.disabled = false;
+  btn.textContent = 'Tailor resume & cover letter';
 }
 
 function render(data) {
@@ -127,22 +211,27 @@ function render(data) {
           <div class="score ${verdictClass(j)}">${scoreLabel}</div>
         </div>
         <div class="meta2">${esc(j.location || '—')} · via ${esc(j.source || '')}${j.posted ? ' · seen ' + esc(j.posted) : ''}</div>
-        ${j.ai_why ? `<div class="why">${esc(j.ai_why)}</div>` : ''}
+        ${j.ai_why ? `<div class="why">${esc(j.ai_why)}</div>` : (j.ai_score == null ? '<div class="why">Not AI-reviewed yet — this is a rough keyword-based guess.</div>' : '')}
         ${gaps ? `<div class="gaps">Gaps: <ul>${gaps}</ul></div>` : ''}
         ${j.ai_error ? `<div class="err">AI scoring unavailable (${esc(j.ai_error)}) — ranked by keyword prescreen only.</div>` : ''}
-        ${j.url ? `<a class="apply" href="${esc(j.url)}" target="_blank" rel="noopener">Open posting →</a>` : ''}
+        <div class="actions">
+          ${j.url ? `<a class="apply" href="${esc(j.url)}" target="_blank" rel="noopener">Open posting →</a>` : ''}
+          <button class="tailor">Tailor resume &amp; cover letter</button>
+        </div>
+        <div class="tailor-slot"></div>
       `;
+      el.querySelector('.tailor').addEventListener('click', (ev) =>
+        tailor(j, ev.target, el.querySelector('.tailor-slot')));
       list.appendChild(el);
     }
   }
-  function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
   search.addEventListener('input', draw);
   minScore.addEventListener('change', draw);
   targetOnly.addEventListener('change', draw);
   draw();
 }
-load();
+boot();
 </script>
 </body>
 </html>
