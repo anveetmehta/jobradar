@@ -32,13 +32,54 @@ jobs:
         run: |
           python jobradar.py init
           test -f config.json && test -f profile.json
-      - name: web UI reports configured after init, serves the setup + main pages
+      - name: web UI reports configured after init, serves the setup + main pages, includes full payload for pre-fill
         run: |
           python jobradar.py serve --port 8765 & echo $! > /tmp/serve.pid
           sleep 2
-          curl -sf http://localhost:8765/api/config | grep -q '"configured": true'
+          out=$(curl -sf http://localhost:8765/api/config)
+          echo "$out" | grep -q '"configured": true'
+          echo "$out" | grep -q '"config":' # Phase 2a: full payload for setup.html to pre-fill from
+          echo "$out" | grep -q '"profile":'
+          echo "$out" | grep -q '"ats_companies":' # Phase 0: renamed from watched_companies
           curl -sf -o /dev/null http://localhost:8765/web/setup.html
           curl -sf -o /dev/null http://localhost:8765/web/index.html
+          kill $(cat /tmp/serve.pid)
+      - name: /api/test-ai reports unreachable cleanly (no Ollama on the CI runner)
+        run: |
+          python jobradar.py serve --port 8765 & echo $! > /tmp/serve.pid
+          sleep 2
+          out=$(curl -sf -X POST -H 'Content-Type: application/json' \
+            -d '{"backend":"ollama","model":"nonexistent-model-xyz"}' \
+            http://localhost:8765/api/test-ai)
+          echo "$out"
+          echo "$out" | grep -q '"reachable": false'
+          out2=$(curl -sf -X POST -H 'Content-Type: application/json' \
+            -d '{"backend":"anthropic","model":"claude-sonnet-5"}' http://localhost:8765/api/test-ai)
+          echo "$out2"
+          echo "$out2" | grep -q '"reason": "missing_key"'
+          kill $(cat /tmp/serve.pid)
+      - name: /api/pull-model reports "not installed" cleanly (no ollama binary on the CI runner)
+        run: |
+          python jobradar.py serve --port 8765 & echo $! > /tmp/serve.pid
+          sleep 2
+          curl -sf -X POST -H 'Content-Type: application/json' -d '{"model":"mistral-nemo"}' \
+            http://localhost:8765/api/pull-model > /dev/null
+          for i in $(seq 1 10); do
+            out=$(curl -sf http://localhost:8765/api/pull-model/status)
+            echo "$out"
+            echo "$out" | grep -q '"status": "error"' && break
+            sleep 1
+          done
+          echo "$out" | grep -q "not_installed"
+          kill $(cat /tmp/serve.pid)
+      - name: /api/resolve-companies merges a hand-resolved slug into ats_companies
+        run: |
+          python jobradar.py serve --port 8765 & echo $! > /tmp/serve.pid
+          sleep 2
+          curl -sf -X POST -H 'Content-Type: application/json' \
+            -d '{"companies":[{"name":"CI Test Co","slug":"citestco","ats":"greenhouse"}]}' \
+            http://localhost:8765/api/resolve-companies | grep -q '"CI Test Co"'
+          grep -q '"CI Test Co"' config.json
           kill $(cat /tmp/serve.pid)
       - name: verify reaches the configured ATS boards
         run: python jobradar.py verify

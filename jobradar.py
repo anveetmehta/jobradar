@@ -241,6 +241,7 @@ def run_scan(cfg, base_dir, profile, fast=False, fresh=False, out_path="data/res
 
     min_score = ai_cfg.get("min_score", 0)
     kept = [j for j in all_jobs if (j["ai_score"] is None or j["ai_score"] >= min_score)]
+    dropped_below_min_score = len(all_jobs) - len(kept)
     kept.sort(key=lambda j: (-j["is_target"], -j["rank_score"]))
 
     errs = sum(1 for j in to_score if j.get("ai_error"))
@@ -253,6 +254,8 @@ def run_scan(cfg, base_dir, profile, fast=False, fresh=False, out_path="data/res
         "ai_backend": f"{ai_cfg.get('backend','ollama')}/{ai_cfg.get('model','')}"
                      if not fast else "none (--fast)",
         "count": len(kept),
+        "min_score": min_score,
+        "dropped_below_min_score": dropped_below_min_score,
         "jobs": kept,
     }, indent=2))
     report(f"wrote {len(kept)} ranked roles")

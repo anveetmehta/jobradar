@@ -4,29 +4,65 @@ Static files (web/, data/, output/, docs/) plus a handful of JSON API routes
 so the whole loop — set up your profile, run a scan, browse matches, get a
 tailored resume/cover letter — happens in the browser, no CLI required.
 
-  GET  /api/config      -> is a profile/config already set up, and (redacted) what's in it
-  POST /api/setup       -> writes config.json + profile.json from the setup form
-  POST /api/scan        -> starts a scan in the background ({"fast": bool} in the body)
-  GET  /api/scan/status -> poll while a scan runs: {status, message, count}
-  POST /api/tailor      -> runs the tailor pipeline for one job, returns file URLs
+  GET  /api/config          -> is a profile/config set up; redacted summary +
+                               (when configured) the full config/profile for
+                               the setup form to pre-fill from
+  POST /api/setup           -> writes config.json + profile.json from the setup form
+  POST /api/resolve-companies -> merges hand-resolved {name,slug,ats} entries
+                               into ats_companies, for target companies the
+                               automatic match in /api/setup couldn't place
+  POST /api/scan            -> starts a scan in the background ({"fast": bool})
+  GET  /api/scan/status     -> poll while a scan runs: {status, message, count}
+  POST /api/tailor          -> runs the tailor pipeline for one job, file URLs back
+  POST /api/test-ai         -> checks the configured AI backend is actually reachable
+  POST /api/pull-model      -> starts `ollama pull <model>` in the background
+  GET  /api/pull-model/status -> poll while a pull runs
 
 `watch` stays a CLI/cron thing on purpose — it's meant to run for days
 unattended, which isn't something a browser tab should be responsible for.
 """
 import json
+import subprocess
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse
 
+import requests
+
 import jobradar as jr
+import match
 
 HERE = Path(__file__).parent
 STATIC_ROOTS = ("web", "data", "output", "docs")
 
 _scan_lock = threading.Lock()
 _scan_state = {"status": "idle", "message": "", "count": 0, "error": None}
+
+_pull_lock = threading.Lock()
+_pull_state = {"status": "idle", "message": "", "error": None}
+
+
+def _friendly_error(e):
+    """Translate an exception into something a non-technical user can read
+    without losing the original for the terminal (callers still log the raw
+    exception to stderr alongside this)."""
+    if isinstance(e, jr.ConfigError):
+        return str(e)
+    if isinstance(e, requests.exceptions.ConnectionError):
+        return ("Could not reach your AI backend. If you're using Ollama, is "
+                "`ollama serve` running? If Anthropic/OpenAI, check your internet "
+                "connection.")
+    if isinstance(e, requests.exceptions.Timeout):
+        return "The AI backend took too long to respond. Try again, or check it's not overloaded."
+    if isinstance(e, json.JSONDecodeError):
+        return ("One of your config files has invalid JSON — see the terminal running "
+                "jobradar for details, or re-run setup to regenerate it.")
+    if isinstance(e, KeyError):
+        return (f"Your config.json is missing an expected field: {e}. Try re-running "
+                f"setup, or compare against examples/config.example.json.")
+    return f"Something went wrong ({type(e).__name__}). See the terminal running jobradar for details."
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -78,10 +114,17 @@ class Handler(BaseHTTPRequestHandler):
     # ---- routes --------------------------------------------------------
     def do_GET(self):
         route = urlparse(self.path).path
-        if route == "/api/config":
-            return self._get_config()
-        if route == "/api/scan/status":
-            return self._json(200, dict(_scan_state))
+        try:
+            if route == "/api/config":
+                return self._get_config()
+            if route == "/api/scan/status":
+                return self._json(200, dict(_scan_state))
+            if route == "/api/pull-model/status":
+                return self._json(200, dict(_pull_state))
+        except Exception as e:  # noqa: BLE001 — surface it to the UI, don't crash the server
+            import traceback
+            traceback.print_exc(file=sys.stderr)
+            return self._json(500, {"error": _friendly_error(e)})
         self._serve_static()
 
     def do_POST(self):
@@ -89,12 +132,20 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if route == "/api/setup":
                 return self._post_setup()
+            if route == "/api/resolve-companies":
+                return self._post_resolve_companies()
             if route == "/api/scan":
                 return self._post_scan()
             if route == "/api/tailor":
                 return self._post_tailor()
+            if route == "/api/test-ai":
+                return self._post_test_ai()
+            if route == "/api/pull-model":
+                return self._post_pull_model()
         except Exception as e:  # noqa: BLE001 — surface it to the UI, don't crash the server
-            return self._json(500, {"error": f"{type(e).__name__}: {e}"})
+            import traceback
+            traceback.print_exc(file=sys.stderr)
+            return self._json(500, {"error": _friendly_error(e)})
         self.send_error(404)
 
     # ---- /api/config -----------------------------------------------------
@@ -112,8 +163,13 @@ class Handler(BaseHTTPRequestHandler):
                 "target_companies": cfg.get("target_companies", []),
                 "ai_backend": cfg.get("ai", {}).get("backend", ""),
                 "ai_model": cfg.get("ai", {}).get("model", ""),
-                "watched_companies": [c["name"] for c in cfg.get("ats_companies", [])],
+                "ats_companies": [c["name"] for c in cfg.get("ats_companies", [])],
             }
+            # Full contents for the setup form to pre-fill from (Phase 3). Neither file
+            # has ever held a secret — API keys stay in the environment, never written
+            # here — so there's nothing newly sensitive about returning this.
+            out["config"] = cfg
+            out["profile"] = prof
         self._json(200, out)
 
     # ---- /api/scan -------------------------------------------------------
@@ -140,8 +196,10 @@ class Handler(BaseHTTPRequestHandler):
                     _scan_state.update(status="done", message="done",
                                        count=len(result["kept"]), error=None)
             except Exception as e:  # noqa: BLE001 — surface it to the UI, don't crash the server
+                import traceback
+                traceback.print_exc(file=sys.stderr)
                 with _scan_lock:
-                    _scan_state.update(status="error", error=f"{type(e).__name__}: {e}")
+                    _scan_state.update(status="error", error=_friendly_error(e))
 
         threading.Thread(target=worker, daemon=True).start()
         self._json(202, dict(_scan_state))
@@ -159,7 +217,25 @@ class Handler(BaseHTTPRequestHandler):
             if not hit:
                 hit = next((c for c in known.values() if name.lower() in c["name"].lower()
                            or c["name"].lower() in name.lower()), None)
-            (matched if hit else unmatched).append(hit or name)
+            if hit:
+                matched.append(hit)
+            else:
+                unmatched.append({"name": name, "needs_slug": True})
+
+        # A previous setup may already have hand-resolved some of these via
+        # /api/resolve-companies — carry those forward instead of losing them
+        # if the user re-submits the setup form (e.g. editing an unrelated field).
+        if (HERE / "config.json").exists():
+            try:
+                prior = json.loads((HERE / "config.json").read_text())
+                prior_by_name = {c["name"].lower(): c for c in prior.get("ats_companies", [])}
+                still_unmatched = []
+                for u in unmatched:
+                    hit = prior_by_name.get(u["name"].lower())
+                    (matched if hit else still_unmatched).append(hit or u)
+                unmatched = still_unmatched
+            except (json.JSONDecodeError, OSError):
+                pass  # a broken existing config.json shouldn't block writing a fresh one
 
         cfg = dict(example_cfg)
         for k in list(cfg.keys()):
@@ -189,10 +265,38 @@ class Handler(BaseHTTPRequestHandler):
         (HERE / "profile.json").write_text(json.dumps(profile, indent=2))
 
         self._json(200, {"ok": True, "unmatched_companies": unmatched,
+                         # kept for CI / non-JS consumers; the setup page's real UX for this
+                         # is the inline per-company resolve panel, not this string.
                          "note": (f"{len(unmatched)} target compan{'y is' if len(unmatched)==1 else 'ies are'} "
-                                 f"not wired to a pollable job board yet — edit config.json's "
-                                 f"ats_companies to add slugs for them."
+                                 f"not wired to a pollable job board yet — resolve them below, "
+                                 f"or edit config.json's ats_companies by hand."
                                  if unmatched else "")})
+
+    # ---- /api/resolve-companies -------------------------------------------
+    def _post_resolve_companies(self):
+        """Accepts hand-resolved {name, slug, ats} entries for target companies
+        /api/setup's automatic match couldn't place, and merges them into
+        config.json's ats_companies. Companion to the per-company panel
+        /api/setup's `unmatched_companies` response drives."""
+        body = self._read_json_body()
+        resolved = body.get("companies", [])
+        if not resolved:
+            return self._json(400, {"error": "no companies provided"})
+
+        cfg = jr.load_config(str(HERE / "config.json"))
+        existing = {c["name"].lower() for c in cfg.get("ats_companies", [])}
+        added = []
+        for c in resolved:
+            name, slug, ats = c.get("name", "").strip(), c.get("slug", "").strip(), c.get("ats", "")
+            if not (name and slug and ats):
+                continue
+            if name.lower() in existing:
+                continue
+            cfg.setdefault("ats_companies", []).append({"name": name, "slug": slug, "ats": ats})
+            existing.add(name.lower())
+            added.append(name)
+        (HERE / "config.json").write_text(json.dumps(cfg, indent=2))
+        self._json(200, {"ok": True, "added": added})
 
     # ---- /api/tailor ---------------------------------------------------
     def _post_tailor(self):
@@ -224,3 +328,102 @@ class Handler(BaseHTTPRequestHandler):
             "claim_flags": report["claim_flags"],
             "unmet_requirements": report["unmet_requirements"],
         })
+
+    # ---- /api/test-ai ------------------------------------------------------
+    def _post_test_ai(self):
+        """Checks whether the chosen AI backend is actually usable right now.
+        Synchronous, not background-thread+polling like /api/scan — a single
+        minimal LLM call is bounded (a few seconds, well under match.py's own
+        90s TIMEOUT), so it doesn't need that shape."""
+        body = self._read_json_body()
+        backend = body.get("backend", "ollama")
+        model = body.get("model", "")
+
+        if backend == "ollama":
+            host = body.get("ollama_host", "http://localhost:11434")
+            try:
+                r = requests.get(f"{host.rstrip('/')}/api/tags", timeout=3)
+                r.raise_for_status()
+            except requests.exceptions.RequestException:
+                return self._json(200, {"ok": False, "reachable": False, "model_found": False,
+                                        "message": "Ollama isn't reachable. Is it installed and "
+                                                   "running (`ollama serve`)?"})
+            tags = [t.get("name", "") for t in r.json().get("models", [])]
+            model_found = any(t == model or t.split(":")[0] == model.split(":")[0] for t in tags)
+            if not model_found:
+                return self._json(200, {"ok": False, "reachable": True, "model_found": False,
+                                        "message": f"Ollama is running, but `{model}` isn't "
+                                                   f"downloaded yet."})
+            return self._json(200, {"ok": True, "reachable": True, "model_found": True,
+                                    "message": "Connected — ready to go."})
+
+        if backend in ("anthropic", "openai"):
+            api_key = jr._ai_api_key({"backend": backend})
+            if not api_key:
+                env_var = "ANTHROPIC_API_KEY" if backend == "anthropic" else "OPENAI_API_KEY"
+                return self._json(200, {"ok": False, "reason": "missing_key",
+                                        "message": f"{env_var} isn't set in the environment "
+                                                   f"jobradar is running in. Set it in your "
+                                                   f"terminal, then restart jobradar."})
+            try:
+                match.call_llm("Reply with only the single word: ok", "ok",
+                               {"backend": backend, "model": model}, api_key)
+            except requests.exceptions.HTTPError as e:
+                if e.response is not None and e.response.status_code == 401:
+                    return self._json(200, {"ok": False, "reason": "rejected",
+                                            "message": "That API key was rejected. Double-check "
+                                                       "it was copied correctly, and that your "
+                                                       "account has API access enabled (this is "
+                                                       "separate from a normal ChatGPT/Claude.ai "
+                                                       "subscription)."})
+                return self._json(200, {"ok": False, "reason": "error", "message": str(e)})
+            except requests.exceptions.RequestException as e:
+                return self._json(200, {"ok": False, "reason": "network",
+                                        "message": f"Could not reach the API: {e}"})
+            return self._json(200, {"ok": True, "message": "Connected."})
+
+        return self._json(400, {"error": f"unknown backend {backend!r}"})
+
+    # ---- /api/pull-model -----------------------------------------------
+    def _post_pull_model(self):
+        """Starts `ollama pull <model>` in the background. The setup page shows
+        an explicit confirm dialog before ever calling this — it is never
+        triggered silently. Mirrors _post_scan's background-thread+polling shape."""
+        body = self._read_json_body()
+        model = body.get("model", "").strip()
+        if not model:
+            return self._json(400, {"error": "no model specified"})
+
+        with _pull_lock:
+            if _pull_state["status"] == "running":
+                return self._json(409, dict(_pull_state))
+            _pull_state.update(status="running", message=f"starting pull of {model}...", error=None)
+
+        def worker():
+            try:
+                proc = subprocess.Popen(["ollama", "pull", model], stdout=subprocess.PIPE,
+                                        stderr=subprocess.STDOUT, text=True, bufsize=1)
+                for line in proc.stdout:
+                    line = line.strip()
+                    if line:
+                        with _pull_lock:
+                            _pull_state["message"] = line
+                code = proc.wait()
+                with _pull_lock:
+                    if code == 0:
+                        _pull_state.update(status="done", message=f"{model} is ready.", error=None)
+                    else:
+                        _pull_state.update(status="error",
+                                           error=f"`ollama pull {model}` exited with code {code}.")
+            except FileNotFoundError:
+                with _pull_lock:
+                    _pull_state.update(status="error",
+                                       error="not_installed: the `ollama` command isn't on PATH.")
+            except Exception as e:  # noqa: BLE001
+                import traceback
+                traceback.print_exc(file=sys.stderr)
+                with _pull_lock:
+                    _pull_state.update(status="error", error=_friendly_error(e))
+
+        threading.Thread(target=worker, daemon=True).start()
+        self._json(202, dict(_pull_state))
