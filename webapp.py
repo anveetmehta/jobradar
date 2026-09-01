@@ -13,7 +13,8 @@ tailored resume/cover letter — happens in the browser, no CLI required.
                                automatic match in /api/setup couldn't place
   POST /api/scan            -> starts a scan in the background ({"fast": bool})
   GET  /api/scan/status     -> poll while a scan runs: {status, message, count}
-  POST /api/tailor          -> runs the tailor pipeline for one job, file URLs back
+  POST /api/tailor          -> starts the tailor pipeline for one job in the background
+  GET  /api/tailor/status   -> poll while it runs: {status, message, result, error}
   POST /api/test-ai         -> checks the configured AI backend is actually reachable
   POST /api/pull-model      -> starts `ollama pull <model>` in the background
   GET  /api/pull-model/status -> poll while a pull runs
@@ -42,6 +43,9 @@ _scan_state = {"status": "idle", "message": "", "count": 0, "error": None}
 
 _pull_lock = threading.Lock()
 _pull_state = {"status": "idle", "message": "", "error": None}
+
+_tailor_lock = threading.Lock()
+_tailor_state = {"status": "idle", "message": "", "result": None, "error": None}
 
 
 def _friendly_error(e):
@@ -121,6 +125,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(200, dict(_scan_state))
             if route == "/api/pull-model/status":
                 return self._json(200, dict(_pull_state))
+            if route == "/api/tailor/status":
+                return self._json(200, dict(_tailor_state))
         except Exception as e:  # noqa: BLE001 — surface it to the UI, don't crash the server
             import traceback
             traceback.print_exc(file=sys.stderr)
@@ -300,34 +306,63 @@ class Handler(BaseHTTPRequestHandler):
 
     # ---- /api/tailor ---------------------------------------------------
     def _post_tailor(self):
+        """Background-thread + polling, same shape as /api/scan (Phase 4c) —
+        a real tailor run is two sequential LLM calls plus PDF page-fitting,
+        genuinely "slow" by this codebase's own definition, so the old
+        synchronous 200/502 response gave the browser nothing to show while
+        waiting. Returns 202 immediately; poll GET /api/tailor/status."""
         body = self._read_json_body()
         job_rec = body.get("job")
         if not job_rec or not job_rec.get("url"):
             return self._json(400, {"error": "no job (with a url) provided"})
 
-        cfg = jr.load_config(str(HERE / "config.json"))
-        profile = jr.load_profile(cfg, HERE)
-        profile_text = jr.profile_to_text(profile)
+        with _tailor_lock:
+            if _tailor_state["status"] == "running":
+                return self._json(409, dict(_tailor_state))
+            _tailor_state.update(status="running", message="starting...", result=None, error=None)
 
-        report = jr.tailor_job(job_rec, profile, profile_text, cfg, HERE)
-        if report.get("error"):
-            return self._json(502, {"error": report["error"]})
+        def worker():
+            try:
+                cfg = jr.load_config(str(HERE / "config.json"))
+                profile = jr.load_profile(cfg, HERE)
+                profile_text = jr.profile_to_text(profile)
 
-        def rel(p):
-            return "/" + str(Path(p).relative_to(HERE)) if p else None
+                def on_progress(msg):
+                    with _tailor_lock:
+                        _tailor_state["message"] = msg
 
-        self._json(200, {
-            "ok": True,
-            "resume_url": rel(report["resume_report"]["html_path"]),
-            "resume_pages": report["resume_report"]["pages"],
-            "resume_warnings": report["resume_report"]["warnings"],
-            "cover_letter_url": rel(report["letter_report"]["html_path"]) if report["letter_report"] else None,
-            "cover_letter_pages": report["letter_report"]["pages"] if report["letter_report"] else None,
-            "cover_letter_warnings": report["letter_report"]["warnings"] if report["letter_report"] else [],
-            "removed_skills": report["removed_skills"],
-            "claim_flags": report["claim_flags"],
-            "unmet_requirements": report["unmet_requirements"],
-        })
+                report = jr.tailor_job(job_rec, profile, profile_text, cfg, HERE,
+                                       progress=on_progress)
+                if report.get("error"):
+                    with _tailor_lock:
+                        _tailor_state.update(status="error", error=report["error"])
+                    return
+
+                def rel(p):
+                    return "/" + str(Path(p).relative_to(HERE)) if p else None
+
+                result = {
+                    "ok": True,
+                    "resume_url": rel(report["resume_report"]["html_path"]),
+                    "resume_pages": report["resume_report"]["pages"],
+                    "resume_warnings": report["resume_report"]["warnings"],
+                    "cover_letter_url": rel(report["letter_report"]["html_path"]) if report["letter_report"] else None,
+                    "cover_letter_pages": report["letter_report"]["pages"] if report["letter_report"] else None,
+                    "cover_letter_warnings": report["letter_report"]["warnings"] if report["letter_report"] else [],
+                    "removed_skills": report["removed_skills"],
+                    "claim_flags": report["claim_flags"],
+                    "unmet_requirements": report["unmet_requirements"],
+                }
+                with _tailor_lock:
+                    _tailor_state.update(status="done", message="done", result=result, error=None)
+            except Exception as e:  # noqa: BLE001 — surface it to the UI, don't crash the server
+                import traceback
+                traceback.print_exc(file=sys.stderr)
+                with _tailor_lock:
+                    _tailor_state.update(status="error", error=_friendly_error(e))
+
+        threading.Thread(target=worker, daemon=True).start()
+        self._json(202, dict(_tailor_state))
 
     # ---- /api/test-ai ------------------------------------------------------
     def _post_test_ai(self):

@@ -314,19 +314,30 @@ def _ai_api_key(ai_cfg):
     return None
 
 
-def tailor_job(job_rec, profile, profile_text, cfg, base_dir, out_dir_name="output"):
+def tailor_job(job_rec, profile, profile_text, cfg, base_dir, out_dir_name="output",
+               progress=None):
     """Shared by `tailor` and `watch --auto-tailor`. Returns a report dict;
     never raises — a failure is reported, not a crash, since `watch` must
-    keep polling regardless of one bad AI call."""
+    keep polling regardless of one bad AI call. `progress`, if given, is
+    called with a short status string at each phase — mirrors run_scan's
+    same parameter, used by webapp.py's async /api/tailor (Phase 4) so the
+    web UI can show real phase text instead of a static time guess."""
+    def report_phase(msg):
+        if progress:
+            progress(msg)
+
     ai_cfg = cfg.get("ai", {})
     api_key = _ai_api_key(ai_cfg)
     desc = description.fetch(job_rec["url"]) if job_rec.get("url") else ""
 
+    report_phase("Generating resume content...")
     resume_content = resume.build_resume(profile_text, job_rec, desc, ai_cfg, api_key)
     if resume_content.get("error"):
         return {"error": resume_content["error"]}
 
     removed_skills = resume.validate_resume(resume_content, profile)
+
+    report_phase("Generating cover letter...")
     letter_content = resume.build_cover_letter(profile_text, job_rec, desc, ai_cfg, api_key)
     claim_flags = []
     if not letter_content.get("error"):
@@ -339,10 +350,12 @@ def tailor_job(job_rec, profile, profile_text, cfg, base_dir, out_dir_name="outp
     out_dir.mkdir(parents=True, exist_ok=True)
     stub = f"{_slug(job_rec.get('company', 'company'))}_{_slug(job_rec.get('title', 'role'))}"
 
+    report_phase("Checking the resume fits one page...")
     resume_report = fit.fit_resume(profile, resume_content, out_dir / f"{stub}_resume.html",
                                    title=f"{profile.get('name','')} — resume")
     letter_report = None
     if not letter_content.get("error"):
+        report_phase("Checking the cover letter fits one page...")
         today = datetime.date.today().strftime("%d %B %Y")
         letter_report = fit.fit_cover_letter(profile, letter_content, job_rec,
                                              out_dir / f"{stub}_cover_letter.html",

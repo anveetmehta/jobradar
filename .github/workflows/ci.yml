@@ -113,6 +113,7 @@ jobs:
           echo "$out" | grep -q '"status": "done"' \
             || (echo "scan did not finish in time"; kill $(cat /tmp/serve.pid); exit 1)
           kill $(cat /tmp/serve.pid)
+          python -c "import json; d=json.load(open('data/results.json')); assert 'dropped_below_min_score' in d and 'min_score' in d"
       - name: tailor fails cleanly (no controlled error, no traceback) with no AI backend up
         run: |
           set +e
@@ -124,17 +125,25 @@ jobs:
             || (echo "expected the controlled error message, got a traceback or something else"; exit 1)
       - name: watch --once completes without crashing (no AI backend, real target-company boards)
         run: python jobradar.py watch --once
-      - name: /api/tailor fails as a clean JSON error, not a server crash, with no AI backend up
+      - name: /api/tailor (now async, Phase 4c) reaches status error cleanly, not a server crash, with no AI backend up
         run: |
           python jobradar.py serve --port 8765 & echo $! > /tmp/serve.pid
           sleep 2
           job=$(python -c "import json; print(json.dumps({'job': json.load(open('data/results.json'))['jobs'][0]}))")
-          # no -f here on purpose: a 502 with a JSON error body is the expected, correct response
-          # when no AI backend is reachable, and -f would discard that body before grep sees it.
-          out=$(curl -s -X POST -H 'Content-Type: application/json' -d "$job" http://localhost:8765/api/tailor)
+          out=$(curl -sf -X POST -H 'Content-Type: application/json' -d "$job" http://localhost:8765/api/tailor)
           echo "$out"
-          echo "$out" | grep -qi '"error"' \
-            || (echo "expected a JSON error field, got something else"; kill $(cat /tmp/serve.pid); exit 1)
+          echo "$out" | grep -q '"status": "running"' \
+            || (echo "expected an immediate 202 running state, got something else"; kill $(cat /tmp/serve.pid); exit 1)
+          for i in $(seq 1 30); do
+            out=$(curl -sf http://localhost:8765/api/tailor/status)
+            echo "$out"
+            echo "$out" | grep -q '"status": "error"' && break
+            sleep 2
+          done
+          echo "$out" | grep -q '"status": "error"' \
+            || (echo "tailor never reached an error state"; kill $(cat /tmp/serve.pid); exit 1)
+          echo "$out" | grep -qi '"error":' \
+            || (echo "expected a non-null error field"; kill $(cat /tmp/serve.pid); exit 1)
           curl -sf -o /dev/null http://localhost:8765/api/config  # server still alive, didn't crash
           kill $(cat /tmp/serve.pid)
       - name: invalid JSON in config.json fails with a plain-language message, not a raw traceback
