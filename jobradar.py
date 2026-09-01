@@ -350,21 +350,44 @@ def tailor_job(job_rec, profile, profile_text, cfg, base_dir, out_dir_name="outp
     out_dir.mkdir(parents=True, exist_ok=True)
     stub = f"{_slug(job_rec.get('company', 'company'))}_{_slug(job_rec.get('title', 'role'))}"
 
+    start_density = cfg.get("render", {}).get("preferred_density", "normal")
+
+    resume_notes = []
+    if removed_skills:
+        resume_notes.append("Removed skill(s) the model added that aren't in your profile: "
+                            + ", ".join(removed_skills))
+    unmet = resume_content.get("unmet_requirements", [])
+    if unmet:
+        resume_notes.append("Requirement(s) from the posting your profile doesn't clearly "
+                            "cover: " + ", ".join(unmet))
+
     report_phase("Checking the resume fits one page...")
     resume_report = fit.fit_resume(profile, resume_content, out_dir / f"{stub}_resume.html",
-                                   title=f"{profile.get('name','')} — resume")
+                                   title=f"{profile.get('name','')} — resume",
+                                   start_density=start_density, extra_notes=resume_notes)
     letter_report = None
+    letter_notes = list(claim_flags)
     if not letter_content.get("error"):
         report_phase("Checking the cover letter fits one page...")
         today = datetime.date.today().strftime("%d %B %Y")
         letter_report = fit.fit_cover_letter(profile, letter_content, job_rec,
                                              out_dir / f"{stub}_cover_letter.html",
-                                             date_str=today)
+                                             date_str=today, start_density=start_density,
+                                             extra_notes=letter_notes)
 
-    return {"resume_report": resume_report, "letter_content_error": letter_content.get("error"),
-            "letter_report": letter_report, "removed_skills": removed_skills,
-            "claim_flags": claim_flags,
-            "unmet_requirements": resume_content.get("unmet_requirements", [])}
+    report = {"resume_report": resume_report, "letter_content_error": letter_content.get("error"),
+             "letter_report": letter_report, "removed_skills": removed_skills,
+             "claim_flags": claim_flags, "unmet_requirements": unmet}
+
+    report_path = out_dir / f"{stub}_resume_report.json"
+    sidecar = dict(report)
+    for key in ("resume_report", "letter_report"):
+        if sidecar.get(key):
+            sidecar[key] = {k: (str(v) if isinstance(v, Path) else v)
+                            for k, v in sidecar[key].items()}
+    report_path.write_text(json.dumps(sidecar, indent=2))
+
+    return report
 
 
 def _print_tailor_report(report):

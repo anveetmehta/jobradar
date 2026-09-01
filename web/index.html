@@ -65,6 +65,8 @@
   button.tailor:disabled { opacity: .55; cursor: default; }
   button.secondary { background: transparent; border: 1px solid var(--line); color: var(--ink);
                       border-radius: 6px; font-size: 12.5px; padding: 6px 11px; cursor: pointer; }
+  input.hm-name { font-family: inherit; font-size: 12.5px; padding: 6px 9px; border: 1px solid var(--line);
+                  border-radius: 6px; background: var(--panel); color: var(--ink); min-width: 0; }
   .tailor-result { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line);
                     font-size: 12.5px; }
   .tailor-result a { color: var(--accent); margin-right: 14px; }
@@ -87,7 +89,7 @@
     .row1 { flex-wrap: wrap; }
     .score-wrap { text-align: left; margin-top: 4px; }
     .actions { flex-direction: column; align-items: stretch; }
-    .actions button, .actions a { width: 100%; text-align: center; }
+    .actions button, .actions a, .actions input.hm-name { width: 100%; text-align: center; }
   }
 </style>
 </head>
@@ -124,6 +126,8 @@
 <script>
 function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
+let profileName = '';
+
 async function boot() {
   let cfg;
   try {
@@ -137,6 +141,7 @@ async function boot() {
     return;
   }
   document.getElementById('meta').textContent = cfg.summary.headline || '';
+  profileName = (cfg.profile && cfg.profile.name) || '';
   const justSetUp = new URLSearchParams(window.location.search).get('justSetUp') === '1';
   load(justSetUp);
 }
@@ -262,9 +267,14 @@ async function pollTailor(btn, resultEl) {
   const r = data.result;
   if (!r) return; // still idle — nothing to render
   let html = `<div class="tailor-result">`;
+  const company = r.company_name || '';
+  const title = r.job_title || '';
+  const nameFor = (kind) => [profileName, company, title, kind].filter(Boolean).join(' - ');
   html += `<a href="${esc(r.resume_url)}" target="_blank">Resume (${r.resume_pages || '?'} page)</a>`;
+  html += ` <a href="${esc(r.resume_url)}" download="${esc(nameFor('Resume'))}.html">Download as…</a>`;
   if (r.cover_letter_url) {
     html += `<a href="${esc(r.cover_letter_url)}" target="_blank">Cover letter (${r.cover_letter_pages || '?'} page)</a>`;
+    html += ` <a href="${esc(r.cover_letter_url)}" download="${esc(nameFor('Cover Letter'))}.html">Download as…</a>`;
   }
   for (const w of [...(r.resume_warnings||[]), ...(r.cover_letter_warnings||[])]) {
     html += `<div class="tailor-warn">${esc(w)}</div>`;
@@ -335,12 +345,16 @@ function render(data) {
         ${j.ai_error ? `<div class="err">AI scoring unavailable (${esc(j.ai_error)}) — ranked by keyword prescreen only.</div>` : ''}
         <div class="actions">
           ${j.url ? `<a class="apply" href="${esc(j.url)}" target="_blank" rel="noopener">Open posting →</a>` : ''}
+          <input class="hm-name" type="text" placeholder="Hiring manager's name (optional)">
           <button class="tailor">Tailor resume &amp; cover letter</button>
         </div>
         <div class="tailor-slot"></div>
       `;
-      el.querySelector('.tailor').addEventListener('click', (ev) =>
-        tailor(j, ev.target, el.querySelector('.tailor-slot')));
+      el.querySelector('.tailor').addEventListener('click', (ev) => {
+        const hm = el.querySelector('.hm-name').value.trim();
+        const jobWithHm = hm ? { ...j, hiring_manager_name: hm } : j;
+        tailor(jobWithHm, ev.target, el.querySelector('.tailor-slot'));
+      });
       list.appendChild(el);
     }
   }

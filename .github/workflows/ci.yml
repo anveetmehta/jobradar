@@ -123,6 +123,47 @@ jobs:
           test $code -ne 0 || (echo "expected a non-zero exit with no AI backend reachable"; exit 1)
           echo "$out" | grep -qi "Could not generate resume content" \
             || (echo "expected the controlled error message, got a traceback or something else"; exit 1)
+      - name: tailor produces sidecar report + hiring-manager salutation (mocked AI, exercises the real happy path since CI has no live backend)
+        run: |
+          python -c "
+          import json
+          from pathlib import Path
+          import resume, jobradar as jr
+
+          def fake_build_resume(profile_text, job_rec, desc, ai_cfg, api_key):
+              return {'headline': 'h', 'summary': 's', 'skills_line': ['A', 'InventedSkillXYZ'],
+                      'experience': [{'company': 'Acme', 'title': 'PM', 'dates': '2020-2024',
+                                      'bullets': ['did a thing']}],
+                      'unmet_requirements': ['req A']}
+
+          def fake_build_cover_letter(profile_text, job_rec, desc, ai_cfg, api_key):
+              return {'opening': 'o', 'body': ['b'], 'closing': 'c', 'acknowledge_gap': ''}
+
+          resume.build_resume = fake_build_resume
+          resume.build_cover_letter = fake_build_cover_letter
+          resume.validate_resume = lambda content, profile: ['InventedSkillXYZ']
+          resume.scan_for_unverified_claims = lambda text, profile: []
+
+          profile = json.load(open('profile.json'))
+          cfg = json.load(open('config.json'))
+          profile_text = jr.profile_to_text(profile)
+          job_rec = {'url': 'https://example.com/j/1', 'company': 'TestCo', 'title': 'Sr PM',
+                     'hiring_manager_name': 'Jane Doe'}
+
+          report = jr.tailor_job(job_rec, profile, profile_text, cfg, Path('.'))
+          resume_html = Path(report['resume_report']['html_path']).read_text()
+          letter_html = Path(report['letter_report']['html_path']).read_text()
+
+          assert 'jobradar-note' in resume_html, 'notes block missing from resume HTML'
+          assert 'req A' in resume_html, 'unmet requirement note missing'
+          assert 'Dear Jane Doe,' in letter_html, 'hiring_manager_name salutation missing'
+
+          sidecars = list(Path('output').glob('*_resume_report.json'))
+          assert sidecars, 'no sidecar *_resume_report.json written'
+          sidecar = json.load(open(sidecars[0]))
+          assert sidecar['removed_skills'] == ['InventedSkillXYZ']
+          print('phase 5 checks passed')
+          "
       - name: watch --once completes without crashing (no AI backend, real target-company boards)
         run: python jobradar.py watch --once
       - name: /api/tailor (now async, Phase 4c) reaches status error cleanly, not a server crash, with no AI backend up

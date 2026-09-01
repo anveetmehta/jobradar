@@ -40,7 +40,8 @@ def _cut_one_bullet(experience):
     return True
 
 
-def fit_resume(profile, content, out_html: Path, title="tailored resume"):
+def fit_resume(profile, content, out_html: Path, title="tailored resume",
+              start_density="normal", extra_notes=None):
     """-> dict: html_path, pdf_path (or None), pages (or None), density,
     cuts_made, warnings (list of str)."""
     browser = pdf.find_browser()
@@ -50,13 +51,13 @@ def fit_resume(profile, content, out_html: Path, title="tailored resume"):
                         "NOT verified. Open the file and check it fits one page yourself "
                         "(print to PDF with margins set to None).")
 
-    density = "normal"
-    html = render.render_resume_html(profile, content, density, title)
+    density = start_density
+    html = render.render_resume_html(profile, content, density, title, extra_notes=extra_notes)
     pages = _write_and_measure(html, out_html, browser)
 
-    if browser and pages != 1:
+    if browser and pages != 1 and density != "compact":
         density = "compact"
-        html = render.render_resume_html(profile, content, density, title)
+        html = render.render_resume_html(profile, content, density, title, extra_notes=extra_notes)
         pages = _write_and_measure(html, out_html, browser)
 
     cuts = 0
@@ -64,7 +65,7 @@ def fit_resume(profile, content, out_html: Path, title="tailored resume"):
         if not _cut_one_bullet(content["experience"]):
             break
         cuts += 1
-        html = render.render_resume_html(profile, content, "compact", title)
+        html = render.render_resume_html(profile, content, "compact", title, extra_notes=extra_notes)
         pages = _write_and_measure(html, out_html, browser)
 
     if browser and pages and pages > 1:
@@ -78,27 +79,31 @@ def fit_resume(profile, content, out_html: Path, title="tailored resume"):
             "density": density, "cuts_made": cuts, "warnings": warnings}
 
 
-def fit_cover_letter(profile, content, job_rec, out_html: Path, date_str=""):
+def fit_cover_letter(profile, content, job_rec, out_html: Path, date_str="",
+                     start_density="normal", extra_notes=None):
     browser = pdf.find_browser()
     warnings = []
     if not browser:
         warnings.append("No headless browser (Chrome/Chromium/Edge) found — page count was "
                         "NOT verified. Open the file and check it fits one page yourself.")
 
-    density = "normal"
-    html = render.render_cover_letter_html(profile, content, job_rec, density, date_str)
+    density = start_density
+    html = render.render_cover_letter_html(profile, content, job_rec, density, date_str,
+                                           extra_notes=extra_notes)
     pages = _write_and_measure(html, out_html, browser)
 
-    if browser and pages != 1:
+    if browser and pages != 1 and density != "compact":
         density = "compact"
-        html = render.render_cover_letter_html(profile, content, job_rec, density, date_str)
+        html = render.render_cover_letter_html(profile, content, job_rec, density, date_str,
+                                               extra_notes=extra_notes)
         pages = _write_and_measure(html, out_html, browser)
 
     cuts = 0
     while browser and pages and pages > 1 and len(content.get("body", [])) > 1 and cuts < MAX_CUTS:
         content["body"].pop()
         cuts += 1
-        html = render.render_cover_letter_html(profile, content, job_rec, "compact", date_str)
+        html = render.render_cover_letter_html(profile, content, job_rec, "compact", date_str,
+                                               extra_notes=extra_notes)
         pages = _write_and_measure(html, out_html, browser)
 
     if browser and pages and pages > 1:

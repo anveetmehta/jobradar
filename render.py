@@ -5,6 +5,29 @@ actual content — see that module for the overflow policy.
 """
 import html as _html
 
+_NOTE_STYLE = """
+  .jobradar-note { display: block; margin-top: 14pt; padding: 6pt 8pt; font-size: 8.5pt;
+    color: #555; border: .5pt dashed #aaa; border-radius: 3pt; }
+  @media print { .jobradar-note { display: none; } }
+"""
+
+
+def _notes_block(density, extra_notes):
+    """A small on-screen-only footer recording what jobradar did to this
+    document (type density used, any fabrication-guard flags) — previously
+    this only ever appeared in the transient web UI/CLI output, so anyone
+    opening the saved file later (e.g. before an interview) had no record
+    anything was flagged. Hidden from print/PDF on purpose: it must never
+    consume page-fitting budget or appear to whoever reads the printed page."""
+    notes = list(extra_notes or [])
+    if density == "compact":
+        notes.insert(0, "Type tightened to fit one page (compact density).")
+    if not notes:
+        return ""
+    items = "".join(f"<li>{_e(n)}</li>" for n in notes)
+    return (f'<div class="jobradar-note"><b>jobradar</b> — review before sending: '
+           f'<ul style="margin:3pt 0 0;padding-left:14pt">{items}</ul></div>')
+
 _DENSITY = {
     "normal":  dict(margin="13mm 15mm", body="10.1pt", lh="1.34", h1="20pt",
                     h2="10.8pt", h2margin="10pt 0 4pt", li="2.2pt", role="6pt"),
@@ -47,7 +70,8 @@ def _base_style(d):
 """
 
 
-def render_resume_html(profile, content, density="normal", title="tailored resume"):
+def render_resume_html(profile, content, density="normal", title="tailored resume",
+                       extra_notes=None):
     d = _DENSITY[density]
     contact = profile.get("contact", {})
     contact_line = " &nbsp;—&nbsp; ".join(
@@ -71,7 +95,7 @@ def render_resume_html(profile, content, density="normal", title="tailored resum
     certs_line = " &nbsp;·&nbsp; ".join(_e(x) for x in certs)
 
     return f"""<title>{_e(title)}</title>
-<style>{_base_style(d)}</style>
+<style>{_base_style(d)}{_NOTE_STYLE}</style>
 <header>
   <h1>{_e(profile.get('name', '')).upper()}</h1>
   <div class="subtitle">{_e(content.get('headline'))}</div>
@@ -85,10 +109,12 @@ def render_resume_html(profile, content, density="normal", title="tailored resum
 {"".join(exp_html)}
 {f'<h2>Education</h2><p class="tight">{edu_line}</p>' if edu_line else ""}
 {f'<h2>Certifications</h2><p class="tight">{certs_line}</p>' if certs_line else ""}
+{_notes_block(density, extra_notes)}
 """
 
 
-def render_cover_letter_html(profile, content, job_rec, density="normal", date_str=""):
+def render_cover_letter_html(profile, content, job_rec, density="normal", date_str="",
+                             extra_notes=None):
     d = _DENSITY[density]
     contact = profile.get("contact", {})
     contact_line = " &nbsp;·&nbsp; ".join(
@@ -96,10 +122,11 @@ def render_cover_letter_html(profile, content, job_rec, density="normal", date_s
                         contact.get("phone"), contact.get("linkedin")) if x)
     body_paras = "".join(f"<p>{_e(p)}</p>" for p in content.get("body", []))
     gap = content.get("acknowledge_gap") or ""
+    salutation = _e(job_rec.get("hiring_manager_name") or "Hiring Team")
 
     return f"""<title>cover letter — {_e(job_rec.get('company'))}</title>
 <style>
-{_base_style(d)}
+{_base_style(d)}{_NOTE_STYLE}
   .meta {{ margin: 14pt 0 12pt; font-size: 10pt; }}
   .meta div {{ margin-bottom: 1pt; }}
   p {{ margin: 0 0 9pt; }}
@@ -113,10 +140,11 @@ def render_cover_letter_html(profile, content, job_rec, density="normal", date_s
   <div>{_e(job_rec.get('company'))} — Hiring Team</div>
   <div><b>Re: {_e(job_rec.get('title'))}</b></div>
 </div>
-<p>Dear Hiring Team,</p>
+<p>Dear {salutation},</p>
 <p>{_e(content.get('opening'))}</p>
 {body_paras}
 {f"<p>{_e(gap)}</p>" if gap else ""}
 <p>{_e(content.get('closing'))}</p>
 <p style="margin-top:14pt">Sincerely,<br><b>{_e(profile.get('name', ''))}</b></p>
+{_notes_block(density, extra_notes)}
 """

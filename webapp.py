@@ -343,6 +343,8 @@ class Handler(BaseHTTPRequestHandler):
 
                 result = {
                     "ok": True,
+                    "company_name": job_rec.get("company", ""),
+                    "job_title": job_rec.get("title", ""),
                     "resume_url": rel(report["resume_report"]["html_path"]),
                     "resume_pages": report["resume_report"]["pages"],
                     "resume_warnings": report["resume_report"]["warnings"],
