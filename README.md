@@ -17,6 +17,9 @@ prepared.
 No login. No scraping by default. **No auto-applying, ever** — this tool finds,
 ranks, and helps you write for roles; you decide what to submit.
 
+📖 **[Full user manual](docs/USER_MANUAL.md)** — setup walkthrough, every
+config field, the CLI and web API reference, and troubleshooting.
+
 ![jobradar UI](docs/screenshot.png)
 
 ## Why
