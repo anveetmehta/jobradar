@@ -18,6 +18,8 @@ tailored resume/cover letter — happens in the browser, no CLI required.
   POST /api/test-ai         -> checks the configured AI backend is actually reachable
   POST /api/pull-model      -> starts `ollama pull <model>` in the background
   GET  /api/pull-model/status -> poll while a pull runs
+  GET  /api/verify          -> health-checks every board in ats_companies,
+                               the web equivalent of `jobradar.py verify`
 
 `watch` stays a CLI/cron thing on purpose — it's meant to run for days
 unattended, which isn't something a browser tab should be responsible for.
@@ -127,6 +129,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(200, dict(_pull_state))
             if route == "/api/tailor/status":
                 return self._json(200, dict(_tailor_state))
+            if route == "/api/verify":
+                return self._get_verify()
         except Exception as e:  # noqa: BLE001 — surface it to the UI, don't crash the server
             import traceback
             traceback.print_exc(file=sys.stderr)
@@ -177,6 +181,20 @@ class Handler(BaseHTTPRequestHandler):
             out["config"] = cfg
             out["profile"] = prof
         self._json(200, out)
+
+    # ---- /api/verify -------------------------------------------------------
+    def _get_verify(self):
+        """The web equivalent of `jobradar.py verify` — same underlying
+        ats.verify() call cmd_verify already makes, so a broken/mistyped ATS
+        slug is diagnosable from the browser instead of only the CLI.
+        ats.verify() already parallelizes its own requests internally
+        (ThreadPoolExecutor), so this stays synchronous rather than the
+        background-thread+polling pattern used for scan/tailor."""
+        cfg = jr.load_config(str(HERE / "config.json"))
+        results = jr.ats.verify(cfg.get("ats_companies", []))
+        boards = [{"name": c["name"], "ats": c["ats"], "status": status, "count": n}
+                  for c, status, n in results]
+        self._json(200, {"boards": boards})
 
     # ---- /api/scan -------------------------------------------------------
     def _post_scan(self):

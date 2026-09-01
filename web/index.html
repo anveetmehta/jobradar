@@ -201,15 +201,35 @@ async function poll() {
       status.textContent = s.message || 'working...';
       setTimeout(poll, 1500);
     } else if (s.status === 'error') {
-      status.textContent = 'Scan failed: ' + s.error;
+      status.innerHTML = `Scan failed: ${esc(s.error)} ` +
+        `<button class="secondary" id="verify-link">Check your company boards →</button>`;
       document.getElementById('scan-fast').disabled = false;
       document.getElementById('scan-full').disabled = false;
+      document.getElementById('verify-link').addEventListener('click', () => runVerify(status));
     } else if (s.status === 'done') {
       status.textContent = `Done — ${s.count} roles. Loading...`;
       setTimeout(() => load(false), 400);
     }
   } catch (e) {
     status.textContent = 'Lost contact with the server — is it still running?';
+  }
+}
+
+async function runVerify(container) {
+  const box = document.createElement('div');
+  box.style.cssText = 'margin-top:10px;font-size:12.5px;line-height:1.7';
+  box.textContent = 'Checking your company boards…';
+  container.appendChild(box);
+  try {
+    const data = await (await fetch('/api/verify')).json();
+    const boards = data.boards || [];
+    box.innerHTML = boards.length ? boards.map(b => {
+      const broken = b.status !== '200';
+      const tag = broken ? `broken (status ${esc(b.status)})` : (b.count === 0 ? 'no open roles right now' : `${b.count} postings`);
+      return `<div>${broken ? '⚠' : '✓'} <b>${esc(b.name)}</b> <span style="color:var(--muted)">(${esc(b.ats)})</span> — ${tag}</div>`;
+    }).join('') : 'No companies configured yet — add some in setup.';
+  } catch (e) {
+    box.textContent = 'Could not check company boards: ' + e.message;
   }
 }
 

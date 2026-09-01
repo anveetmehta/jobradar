@@ -411,7 +411,9 @@ function renderUnmatchedPanel(unmatched) {
         <div><label>Slug <span class="opt">from their careers page URL</span></label><input type="text" class="resolve-slug" placeholder="company-name"></div>
         <div><button type="button" class="btn-secondary resolve-one">Add</button></div>
       </div>`).join('') +
-    `<p class="hint" style="margin:6px 0 0">Find the slug in the company's careers-page URL — e.g. boards.greenhouse.io/<b>slug</b>, jobs.lever.co/<b>slug</b>. Or browse <a href="https://github.com/kalil0321/ats-scrapers/tree/main/ats-companies" target="_blank" rel="noopener">this dataset</a> for a large list.</p></div>`;
+    `<p class="hint" style="margin:6px 0 0">Find the slug in the company's careers-page URL — e.g. boards.greenhouse.io/<b>slug</b>, jobs.lever.co/<b>slug</b>. Or browse <a href="https://github.com/kalil0321/ats-scrapers/tree/main/ats-companies" target="_blank" rel="noopener">this dataset</a> for a large list.</p>` +
+    `<button type="button" class="btn-secondary" id="verify-link" style="margin-top:8px">Check your company boards →</button>` +
+    `<div id="verify-results"></div></div>`;
   el.querySelectorAll('.resolve-one').forEach(btn => btn.addEventListener('click', async (e) => {
     const row = e.target.closest('.company-row');
     const name = row.dataset.name;
@@ -423,6 +425,23 @@ function renderUnmatchedPanel(unmatched) {
     const data = await res.json();
     if (data.ok) row.innerHTML = `<div style="color:var(--good);font-size:12.5px">✓ ${esc(name)} added</div>`;
   }));
+  document.getElementById('verify-link').addEventListener('click', () => runVerify(document.getElementById('verify-results')));
+}
+
+async function runVerify(container) {
+  container.style.cssText = 'margin-top:8px;font-size:12.5px;line-height:1.7';
+  container.textContent = 'Checking your company boards…';
+  try {
+    const data = await (await fetch('/api/verify')).json();
+    const boards = data.boards || [];
+    container.innerHTML = boards.length ? boards.map(b => {
+      const broken = b.status !== '200';
+      const tag = broken ? `broken (status ${esc(b.status)})` : (b.count === 0 ? 'no open roles right now' : `${b.count} postings`);
+      return `<div>${broken ? '⚠' : '✓'} <b>${esc(b.name)}</b> <span class="opt">(${esc(b.ats)})</span> — ${tag}</div>`;
+    }).join('') : 'No companies configured yet.';
+  } catch (e) {
+    container.textContent = 'Could not check company boards: ' + e.message;
+  }
 }
 
 // ---- pre-fill from existing config/profile ------------------------------

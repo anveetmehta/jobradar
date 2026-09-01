@@ -104,6 +104,22 @@ jobs:
           kill $(cat /tmp/serve.pid)
       - name: verify reaches the configured ATS boards
         run: python jobradar.py verify
+      - name: /api/verify is the web equivalent, one entry per configured board
+        run: |
+          python jobradar.py serve --port 8765 & echo $! > /tmp/serve.pid
+          sleep 2
+          curl -sf http://localhost:8765/api/verify -o /tmp/verify_out.json
+          head -c 500 /tmp/verify_out.json
+          python -c "
+          import json
+          d = json.load(open('/tmp/verify_out.json'))
+          boards = d['boards']
+          assert boards, 'expected at least one board'
+          for b in boards:
+              assert set(b.keys()) >= {'name', 'ats', 'status', 'count'}, b
+          print(f'{len(boards)} board(s) checked')
+          "
+          kill $(cat /tmp/serve.pid)
       - name: fast scan runs end-to-end without an AI backend
         run: python jobradar.py scan --fast
       - name: a browser-triggered scan (/api/scan) reaches done, not just the CLI one
