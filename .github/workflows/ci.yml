@@ -19,6 +19,17 @@ jobs:
         run: |
           python -c "import json; json.load(open('examples/config.example.json'))"
           python -c "import json; json.load(open('examples/profile.example.json'))"
+      - name: web/setup.html and web/index.html inline JS has no syntax errors
+        run: |
+          python -c "
+          import re
+          for f in ('web/setup.html', 'web/index.html'):
+              html = open(f).read()
+              m = re.search(r'<script>(.*)</script>', html, re.S)
+              open(f.replace('/', '_') + '.js', 'w').write(m.group(1))
+          "
+          node --check web_setup.html.js
+          node --check web_index.html.js
       - name: web UI reports unconfigured before init
         run: |
           python jobradar.py serve --port 8765 & echo $! > /tmp/serve.pid

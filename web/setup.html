@@ -7,11 +7,11 @@
 <style>
   :root {
     --bg:#f7f7f5; --panel:#ffffff; --ink:#1a1a1a; --muted:#6b6b6b; --line:#e4e4e0;
-    --accent:#2563eb; --accent-ink:#fff; --danger:#b91c1c;
+    --accent:#2563eb; --accent-ink:#fff; --danger:#b91c1c; --good:#16803c; --chip:#eef0ff;
   }
   @media (prefers-color-scheme: dark) {
     :root { --bg:#15161a; --panel:#1e1f24; --ink:#eaeaea; --muted:#9a9a9a; --line:#2c2d33;
-            --accent:#7aa2ff; --accent-ink:#0c1220; --danger:#f87171; }
+            --accent:#7aa2ff; --accent-ink:#0c1220; --danger:#f87171; --good:#4ade80; --chip:#26283a; }
   }
   * { box-sizing: border-box; }
   body { margin:0; background:var(--bg); color:var(--ink);
@@ -34,25 +34,60 @@
   .row { display:grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .row3 { display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
   .exp-block { border: 1px dashed var(--line); border-radius: 8px; padding: 12px; margin: 10px 0; }
+  .exp-block.incomplete { border-color: var(--danger); }
   .exp-block .row3 { grid-template-columns: 2fr 2fr 1fr; }
   button { cursor: pointer; border: none; border-radius: 7px; font-size: 13px; font-weight: 600;
-           padding: 8px 14px; }
+           padding: 8px 14px; font-family: inherit; }
   .btn-add { background: transparent; border: 1px solid var(--line); color: var(--ink); }
   .btn-remove { background: transparent; border: 1px solid var(--danger); color: var(--danger);
                 font-size: 11px; padding: 4px 8px; float: right; }
+  .btn-secondary { background: transparent; border: 1px solid var(--line); color: var(--ink); }
   .btn-primary { background: var(--accent); color: var(--accent-ink); width: 100%;
                  padding: 12px; font-size: 14px; margin-top: 6px; }
-  .btn-primary:disabled { opacity: .5; cursor: default; }
+  .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+  .save-anyway { display:block; text-align:center; font-size: 12px; color: var(--muted);
+                 margin-top: 8px; background:none; border:none; text-decoration: underline;
+                 cursor:pointer; width:100%; }
   .status { font-size: 13px; margin-top: 10px; }
   .status.err { color: var(--danger); }
   .status.ok { color: var(--accent); }
   .model-hint { font-size: 11.5px; color: var(--muted); margin-top: 3px; }
+
+  /* backend picker cards */
+  .backend-cards { display: grid; grid-template-columns: 1fr; gap: 8px; }
+  .backend-card { position: relative; border: 1.5px solid var(--line); border-radius: 8px;
+                  padding: 10px 12px; cursor: pointer; }
+  .backend-card input[type=radio] { position: absolute; top: 12px; right: 12px; margin: 0; width:auto; }
+  .backend-card.selected { border-color: var(--accent); background: var(--chip); }
+  .backend-card b { font-size: 13.5px; }
+  .backend-card p { margin: 3px 26px 0 0; font-size: 12px; color: var(--muted); }
+  .pick-hint { font-size: 12px; color: var(--muted); margin: 8px 0 0; }
+
+  .test-row { display:flex; align-items:center; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+  .test-result { font-size: 12.5px; padding: 8px 10px; border-radius: 6px; margin-top: 8px; }
+  .test-result.ok { background: var(--chip); color: var(--good); }
+  .test-result.bad { background: var(--chip); color: var(--danger); }
+  .test-result.pending { color: var(--muted); }
+  .install-block { background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
+                    padding: 10px; margin-top: 8px; font-size: 12.5px; }
+  .install-block code { display:block; background: var(--panel); border: 1px solid var(--line);
+                         border-radius: 4px; padding: 6px 8px; margin: 6px 0; font-size: 12px;
+                         overflow-x: auto; white-space: pre; }
+  .pull-progress { font-size: 12px; color: var(--muted); margin-top: 6px; font-family: monospace; }
+
+  .company-panel { border: 1px dashed var(--line); border-radius: 8px; padding: 10px 12px; margin-top: 10px; }
+  .company-row { display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; align-items: end; margin: 8px 0; }
+  .company-row label { margin: 4px 0 2px; }
+
+  .cmd-box { background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
+             padding: 8px 10px; font-family: monospace; font-size: 12px; overflow-x: auto;
+             white-space: pre; margin: 6px 0; }
 </style>
 </head>
 <body>
 <header>
   <h1>Set up jobradar</h1>
-  <div class="sub">This writes config.json + profile.json on your machine. Nothing here is sent anywhere yet — it's only used later when you run a scan or ask for a tailored resume.</div>
+  <div class="sub" id="page-sub">This writes config.json + profile.json on your machine. Nothing here is sent anywhere yet — it's only used later when you run a scan or ask for a tailored resume.</div>
 </header>
 <main>
   <form id="f">
@@ -60,122 +95,432 @@
     <section>
       <h2>Who you are</h2>
       <p class="hint">Used to fill the header of any resume/cover letter you generate. Never sent to an AI backend.</p>
-      <label>Full name</label>
-      <input type="text" name="name" required>
+      <label for="in-name">Full name</label>
+      <input type="text" id="in-name" name="name" required>
       <div class="row">
-        <div><label>Location</label><input type="text" name="c_location" placeholder="Bengaluru, India"></div>
-        <div><label>Email</label><input type="email" name="c_email"></div>
+        <div><label for="in-c_location">Location</label><input type="text" id="in-c_location" name="c_location" placeholder="Bengaluru, India"></div>
+        <div><label for="in-c_email">Email</label><input type="email" id="in-c_email" name="c_email"></div>
       </div>
       <div class="row">
-        <div><label>Phone <span class="opt">optional</span></label><input type="text" name="c_phone"></div>
-        <div><label>LinkedIn <span class="opt">optional</span></label><input type="text" name="c_linkedin" placeholder="linkedin.com/in/you"></div>
+        <div><label for="in-c_phone">Phone <span class="opt">optional</span></label><input type="text" id="in-c_phone" name="c_phone"></div>
+        <div><label for="in-c_linkedin">LinkedIn <span class="opt">optional</span></label><input type="text" id="in-c_linkedin" name="c_linkedin" placeholder="linkedin.com/in/you"></div>
       </div>
     </section>
 
     <section>
       <h2>Your background</h2>
       <p class="hint">This is what gets matched against job postings and what your resume is built from. Be specific — a thin profile gets thin matches.</p>
-      <label>Headline</label>
-      <input type="text" name="headline" placeholder="Senior Product Manager — Payments & Identity Platforms" required>
+      <label for="in-headline">Headline</label>
+      <input type="text" id="in-headline" name="headline" placeholder="Senior Product Manager — Payments & Identity Platforms" required>
       <div class="row">
-        <div><label>Years of experience</label><input type="number" name="years_experience" min="0" max="60" required></div>
-        <div><label>Skills <span class="opt">comma separated</span></label><input type="text" name="skills" placeholder="payments, kyc, api, sql" required></div>
+        <div><label for="in-years">Years of experience</label><input type="number" id="in-years" name="years_experience" min="0" max="60" required></div>
+        <div><label for="in-skills">Skills <span class="opt">comma separated</span></label><input type="text" id="in-skills" name="skills" placeholder="payments, kyc, api, sql" required></div>
       </div>
-      <label>Summary</label>
-      <textarea name="summary" required placeholder="3-4 sentences on what you've built and owned."></textarea>
+      <label for="in-summary">Summary</label>
+      <textarea id="in-summary" name="summary" required placeholder="3-4 sentences on what you've built and owned."></textarea>
 
       <label style="margin-top:16px">Experience</label>
       <div id="exp-list"></div>
       <button type="button" class="btn-add" id="add-exp">+ Add role</button>
 
-      <label>Education <span class="opt">one per line</span></label>
-      <textarea name="education" placeholder="MBA, Business Analytics — Your University"></textarea>
-      <label>Certifications <span class="opt">optional, one per line</span></label>
-      <textarea name="certifications"></textarea>
-      <label>Notes for the AI <span class="opt">optional — dealbreakers, seniority preference, etc.</span></label>
-      <textarea name="notes_for_ai"></textarea>
+      <label for="in-education">Education <span class="opt">one per line</span></label>
+      <textarea id="in-education" name="education" placeholder="MBA, Business Analytics — Your University"></textarea>
+      <label for="in-certs">Certifications <span class="opt">optional, one per line</span></label>
+      <textarea id="in-certs" name="certifications"></textarea>
+      <label for="in-notes">Notes for the AI <span class="opt">optional — dealbreakers, seniority preference, etc.</span></label>
+      <textarea id="in-notes" name="notes_for_ai"></textarea>
     </section>
 
     <section>
       <h2>What you're looking for</h2>
-      <label>Job titles <span class="opt">comma separated — postings must match one of these</span></label>
-      <input type="text" name="title_include" placeholder="product manager, group product manager" required>
-      <label>Location <span class="opt">comma separated — city names, or leave blank for anywhere</span></label>
-      <input type="text" name="location_filter" placeholder="bengaluru, bangalore">
-      <label>Target companies <span class="opt">comma separated — pinned to the top of every scan, and watched by `jobradar.py watch`</span></label>
-      <input type="text" name="target_companies" placeholder="Stripe, Razorpay, Airwallex">
+      <label for="in-titles">Job titles <span class="opt">comma separated — postings must match one of these</span></label>
+      <input type="text" id="in-titles" name="title_include" placeholder="product manager, group product manager" required>
+      <label for="in-locs">Location <span class="opt">comma separated — city names, or leave blank for anywhere</span></label>
+      <input type="text" id="in-locs" name="location_filter" placeholder="bengaluru, bangalore">
+      <label for="in-targets">Target companies <span class="opt">comma separated — pinned to the top of every scan</span></label>
+      <input type="text" id="in-targets" name="target_companies" placeholder="Stripe, Razorpay, Airwallex">
+      <p class="hint" style="margin:6px 0 0">Also drives <code>jobradar.py watch</code>'s live alerts — but only for companies jobradar can find a job board for. You'll get a chance to resolve any it can't match automatically after saving.</p>
+      <div id="company-resolve" style="display:none"></div>
     </section>
 
-    <section>
+    <section id="watch-section">
+      <h2>Get alerted on new roles <span class="opt">optional</span></h2>
+      <p class="hint">jobradar can watch your target companies and notify you the moment a new posting appears — even while your laptop is closed, if you schedule it. This runs outside the browser, not something a web page can do for you.</p>
+      <div class="cmd-box" id="watch-cmd">cd &lt;this folder&gt; &amp;&amp; .venv/bin/python jobradar.py watch</div>
+      <p class="hint" style="margin:8px 0 0">To run it on a schedule: <a href="https://www.launchd.info/" target="_blank" rel="noopener">launchd</a> (macOS), <code>cron</code> (Linux), or Task Scheduler (Windows).</p>
+    </section>
+
+    <section id="ai-section">
       <h2>AI backend</h2>
-      <p class="hint">Ollama is free and runs on your machine. Anthropic/OpenAI need an API key set as an environment variable (never entered here).</p>
-      <div class="row">
-        <div>
-          <label>Backend</label>
-          <select name="ai_backend" id="ai_backend">
-            <option value="ollama">Ollama (free, local)</option>
-            <option value="anthropic">Anthropic (Claude)</option>
-            <option value="openai">OpenAI (GPT)</option>
-          </select>
-        </div>
-        <div>
-          <label>Model</label>
-          <input type="text" name="ai_model" id="ai_model" value="mistral-nemo">
-          <div class="model-hint" id="model-hint">Needs `ollama pull mistral-nemo` first. Other good options: qwen2.5:7b, llama3.1:8b, gemma2:9b.</div>
-        </div>
+      <p class="hint">This is what actually judges how well each job fits you.</p>
+
+      <div class="backend-cards" id="backend-cards">
+        <label class="backend-card" data-value="ollama">
+          <input type="radio" name="ai_backend_radio" value="ollama" checked>
+          <b>Ollama (recommended to start)</b>
+          <p>Free. Runs on your computer — nothing about your job search leaves it. Downloads a one-time AI model (a few GB) the first time. Slower than the alternatives; needs a reasonably modern computer.</p>
+        </label>
+        <label class="backend-card" data-value="anthropic">
+          <input type="radio" name="ai_backend_radio" value="anthropic">
+          <b>Anthropic (Claude)</b>
+          <p>Costs a small amount per use — roughly a few cents per job you scan or tailor. Faster and more accurate than a free local model. Needs an API key from Anthropic's developer site — separate from a normal Claude.ai subscription.</p>
+        </label>
+        <label class="backend-card" data-value="openai">
+          <input type="radio" name="ai_backend_radio" value="openai">
+          <b>OpenAI (ChatGPT)</b>
+          <p>Same idea as Anthropic — pay-as-you-go, faster and more accurate than free/local. Needs an API key from OpenAI's developer site — separate from a normal ChatGPT subscription.</p>
+        </label>
       </div>
+      <p class="pick-hint">Not sure? Pick Ollama — you can switch later from this same page.</p>
+
+      <div id="ollama-config" style="margin-top:14px">
+        <label for="in-model-ollama">Model</label>
+        <select id="in-model-ollama">
+          <option value="mistral-nemo">mistral-nemo (recommended — best structured-output reliability)</option>
+          <option value="qwen2.5:7b">qwen2.5:7b (smaller download, strong reasoning)</option>
+          <option value="llama3.1:8b">llama3.1:8b (widely used baseline)</option>
+          <option value="gemma2:9b">gemma2:9b</option>
+        </select>
+      </div>
+
+      <div id="cloud-config" style="display:none; margin-top:14px">
+        <label id="cloud-model-label" for="in-model-cloud">Model</label>
+        <select id="in-model-cloud"></select>
+        <div id="cloud-model-custom" style="display:none; margin-top:6px">
+          <input type="text" id="in-model-custom" placeholder="exact model id">
+        </div>
+        <div id="env-instructions" class="install-block"></div>
+      </div>
+
+      <div class="test-row">
+        <button type="button" class="btn-secondary" id="test-ai-btn">Test connection</button>
+        <span id="test-status" class="test-result pending"></span>
+      </div>
+      <div id="test-detail"></div>
     </section>
 
-    <button type="submit" class="btn-primary" id="submit">Save and continue</button>
+    <button type="submit" class="btn-primary" id="submit" disabled>Test your connection above first</button>
+    <button type="button" class="save-anyway" id="save-anyway">Save anyway, I'll fix this later</button>
     <div class="status" id="status"></div>
   </form>
 </main>
 <script>
+let expCounter = 0;
 const expList = document.getElementById('exp-list');
 function addExp(vals = {}) {
+  const n = expCounter++;
   const div = document.createElement('div');
   div.className = 'exp-block';
   div.innerHTML = `
     <button type="button" class="btn-remove">remove</button>
     <div class="row3">
-      <div><label>Company</label><input type="text" class="exp-company" value="${vals.company||''}"></div>
-      <div><label>Title</label><input type="text" class="exp-title" value="${vals.title||''}"></div>
-      <div><label>Dates</label><input type="text" class="exp-dates" placeholder="2023-06 to Present" value="${vals.dates||''}"></div>
+      <div><label for="exp-company-${n}">Company</label><input type="text" id="exp-company-${n}" class="exp-company" value="${esc(vals.company||'')}"></div>
+      <div><label for="exp-title-${n}">Title</label><input type="text" id="exp-title-${n}" class="exp-title" value="${esc(vals.title||'')}"></div>
+      <div><label for="exp-dates-${n}">Dates</label><input type="text" id="exp-dates-${n}" class="exp-dates" placeholder="2023-06 to Present" value="${esc(vals.dates||'')}"></div>
     </div>
-    <label>Highlights <span class="opt">one per line — these are what a resume is built from</span></label>
-    <textarea class="exp-highlights" rows="3">${(vals.highlights||[]).join('\n')}</textarea>
+    <label for="exp-highlights-${n}">Highlights <span class="opt">one per line — these are what a resume is built from</span></label>
+    <textarea id="exp-highlights-${n}" class="exp-highlights" rows="3">${esc((vals.highlights||[]).join('\n'))}</textarea>
   `;
   div.querySelector('.btn-remove').onclick = () => div.remove();
   expList.appendChild(div);
 }
-document.getElementById('add-exp').onclick = () => addExp();
-addExp(); // start with one
+function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
-const modelDefaults = {
-  ollama: ['mistral-nemo', 'Needs `ollama pull mistral-nemo` first. Other good options: qwen2.5:7b, llama3.1:8b, gemma2:9b.'],
-  anthropic: ['claude-sonnet-5', 'Needs ANTHROPIC_API_KEY set in your shell environment.'],
-  openai: ['gpt-5', 'Needs OPENAI_API_KEY set in your shell environment.'],
+document.getElementById('add-exp').onclick = () => addExp();
+
+// ---- backend picker ----------------------------------------------------
+const cloudModels = {
+  anthropic: ['claude-sonnet-5', 'claude-opus-5', 'claude-haiku-4-5'],
+  openai: ['gpt-5', 'gpt-5-mini'],
 };
-document.getElementById('ai_backend').addEventListener('change', (e) => {
-  const [model, hint] = modelDefaults[e.target.value];
-  document.getElementById('ai_model').value = model;
-  document.getElementById('model-hint').textContent = hint;
+const envInstructions = {
+  anthropic: envBlock('ANTHROPIC_API_KEY'),
+  openai: envBlock('OPENAI_API_KEY'),
+};
+function envBlock(varName) {
+  const isWin = navigator.platform && navigator.platform.toLowerCase().includes('win');
+  const setCmd = isWin ? `$env:${varName}="sk-..."` : `export ${varName}=sk-...`;
+  const permCmd = isWin ? `setx ${varName} "sk-..."` : `echo 'export ${varName}=sk-...' >> ~/.zshrc`;
+  return `Set this in the terminal you'll run jobradar from:<div class="cmd-box">${setCmd}</div>` +
+         `To make it permanent: <div class="cmd-box">${permCmd}</div>` +
+         `<b>You'll need to restart jobradar after setting this</b> — a running server doesn't ` +
+         `pick up environment changes made in a different terminal.`;
+}
+
+function selectedBackend() {
+  return document.querySelector('input[name=ai_backend_radio]:checked').value;
+}
+function selectedModel() {
+  if (selectedBackend() === 'ollama') return document.getElementById('in-model-ollama').value;
+  const sel = document.getElementById('in-model-cloud');
+  if (sel.value === '__other__') return document.getElementById('in-model-custom').value.trim();
+  return sel.value;
+}
+function updateBackendUI() {
+  const backend = selectedBackend();
+  document.querySelectorAll('.backend-card').forEach(c => c.classList.toggle('selected', c.dataset.value === backend));
+  document.getElementById('ollama-config').style.display = backend === 'ollama' ? '' : 'none';
+  document.getElementById('cloud-config').style.display = backend === 'ollama' ? 'none' : '';
+  if (backend !== 'ollama') {
+    const sel = document.getElementById('in-model-cloud');
+    sel.innerHTML = cloudModels[backend].map(m => `<option value="${m}">${m}</option>`).join('')
+                   + '<option value="__other__">other (type your own)</option>';
+    document.getElementById('env-instructions').innerHTML = envInstructions[backend];
+  }
+  resetTestState();
+}
+document.querySelectorAll('input[name=ai_backend_radio]').forEach(r => r.addEventListener('change', updateBackendUI));
+document.getElementById('in-model-cloud').addEventListener('change', (e) => {
+  document.getElementById('cloud-model-custom').style.display = e.target.value === '__other__' ? '' : 'none';
 });
 
-function splitLines(name) {
-  return (document.querySelector(`[name=${name}]`).value || '').split('\n').map(s => s.trim()).filter(Boolean);
+// ---- test connection / gating ------------------------------------------
+let testPassed = false;
+function resetTestState() {
+  testPassed = false;
+  document.getElementById('test-status').textContent = '';
+  document.getElementById('test-status').className = 'test-result pending';
+  document.getElementById('test-detail').innerHTML = '';
+  updateSubmitGate();
 }
-function splitCommas(name) {
-  return (document.querySelector(`[name=${name}]`).value || '').split(',').map(s => s.trim()).filter(Boolean);
+function updateSubmitGate() {
+  const btn = document.getElementById('submit');
+  btn.disabled = !testPassed;
+  btn.textContent = testPassed ? 'Save and continue' : 'Test your connection above first';
+}
+
+function osInstallBlock() {
+  const p = (navigator.platform || '').toLowerCase();
+  if (p.includes('mac')) {
+    return 'Download Ollama from <a href="https://ollama.com/download" target="_blank" rel="noopener">ollama.com/download</a>, ' +
+           'or run <div class="cmd-box">brew install ollama</div> if you use Homebrew. Then start it: <div class="cmd-box">ollama serve</div>';
+  }
+  if (p.includes('win')) {
+    return 'Download the installer from <a href="https://ollama.com/download" target="_blank" rel="noopener">ollama.com/download</a> — Ollama runs automatically after installing.';
+  }
+  return 'Run: <div class="cmd-box">curl -fsSL https://ollama.com/install.sh | sh</div> Then start it: <div class="cmd-box">ollama serve</div>';
+}
+
+let existingOllamaHost = null; // set in boot() if an existing config specifies a non-default host
+
+document.getElementById('test-ai-btn').addEventListener('click', async () => {
+  const backend = selectedBackend();
+  const model = selectedModel();
+  const statusEl = document.getElementById('test-status');
+  const detailEl = document.getElementById('test-detail');
+  statusEl.textContent = 'Testing…';
+  statusEl.className = 'test-result pending';
+  detailEl.innerHTML = '';
+
+  const reqBody = { backend, model };
+  if (existingOllamaHost) reqBody.ollama_host = existingOllamaHost;
+
+  let data;
+  try {
+    const res = await fetch('/api/test-ai', { method: 'POST', headers: {'Content-Type':'application/json'},
+                                              body: JSON.stringify(reqBody) });
+    data = await res.json();
+  } catch (err) {
+    statusEl.textContent = 'Could not reach the server.';
+    statusEl.className = 'test-result bad';
+    return;
+  }
+
+  if (data.ok) {
+    statusEl.textContent = 'Connected — ready to go.';
+    statusEl.className = 'test-result ok';
+    testPassed = true;
+  } else {
+    statusEl.textContent = data.message || 'Not ready.';
+    statusEl.className = 'test-result bad';
+    testPassed = false;
+    if (backend === 'ollama' && !data.reachable) {
+      detailEl.innerHTML = `<div class="install-block">${osInstallBlock()}</div>`;
+    } else if (backend === 'ollama' && data.reachable && !data.model_found) {
+      detailEl.innerHTML = `<div class="install-block">
+        <button type="button" class="btn-secondary" id="pull-btn">Pull this model</button>
+        <div class="pull-progress" id="pull-progress"></div>
+        <div style="margin-top:8px">Or run it yourself: <div class="cmd-box">ollama pull ${esc(model)}</div></div>
+      </div>`;
+      document.getElementById('pull-btn').addEventListener('click', () => startPull(model));
+    }
+  }
+  updateSubmitGate();
+});
+
+async function startPull(model) {
+  const sizeHint = 'several GB';
+  if (!confirm(`This downloads ${sizeHint} from Ollama's servers and may take several minutes. Continue?`)) return;
+  const progressEl = document.getElementById('pull-progress');
+  const pullBtn = document.getElementById('pull-btn');
+  pullBtn.disabled = true;
+  try {
+    await fetch('/api/pull-model', { method: 'POST', headers: {'Content-Type':'application/json'},
+                                     body: JSON.stringify({ model }) });
+  } catch (err) {
+    progressEl.textContent = 'Could not start the download.';
+    pullBtn.disabled = false;
+    return;
+  }
+  pollPull(model, progressEl, pullBtn);
+}
+async function pollPull(model, progressEl, pullBtn) {
+  let data;
+  try {
+    data = await (await fetch('/api/pull-model/status')).json();
+  } catch (err) {
+    progressEl.textContent = 'Lost contact with the server.';
+    pullBtn.disabled = false;
+    return;
+  }
+  if (data.status === 'running') {
+    progressEl.textContent = data.message || 'downloading…';
+    setTimeout(() => pollPull(model, progressEl, pullBtn), 1500);
+  } else if (data.status === 'done') {
+    progressEl.textContent = 'Done. Click "Test connection" again.';
+    pullBtn.disabled = false;
+  } else if (data.status === 'error') {
+    progressEl.textContent = 'Failed: ' + (data.error || 'unknown error');
+    pullBtn.disabled = false;
+  }
+}
+
+document.getElementById('save-anyway').addEventListener('click', () => {
+  testPassed = true;
+  updateSubmitGate();
+  document.getElementById('f').requestSubmit();
+});
+
+// ---- unmatched-company resolve panel -----------------------------------
+function renderUnmatchedPanel(unmatched) {
+  const el = document.getElementById('company-resolve');
+  if (!unmatched || !unmatched.length) { el.style.display = 'none'; el.innerHTML = ''; return; }
+  el.style.display = '';
+  el.innerHTML = `<div class="company-panel"><b style="font-size:12.5px">Couldn't automatically find a job board for:</b>` +
+    unmatched.map((u, i) => `
+      <div class="company-row" data-name="${esc(u.name)}">
+        <div><label>${esc(u.name)}</label>
+          <select class="resolve-ats">
+            <option value="">not sure</option>
+            <option value="greenhouse">Greenhouse</option>
+            <option value="lever">Lever</option>
+            <option value="ashby">Ashby</option>
+            <option value="smartrecruiters">SmartRecruiters</option>
+          </select>
+        </div>
+        <div><label>Slug <span class="opt">from their careers page URL</span></label><input type="text" class="resolve-slug" placeholder="company-name"></div>
+        <div><button type="button" class="btn-secondary resolve-one">Add</button></div>
+      </div>`).join('') +
+    `<p class="hint" style="margin:6px 0 0">Find the slug in the company's careers-page URL — e.g. boards.greenhouse.io/<b>slug</b>, jobs.lever.co/<b>slug</b>. Or browse <a href="https://github.com/kalil0321/ats-scrapers/tree/main/ats-companies" target="_blank" rel="noopener">this dataset</a> for a large list.</p></div>`;
+  el.querySelectorAll('.resolve-one').forEach(btn => btn.addEventListener('click', async (e) => {
+    const row = e.target.closest('.company-row');
+    const name = row.dataset.name;
+    const ats = row.querySelector('.resolve-ats').value;
+    const slug = row.querySelector('.resolve-slug').value.trim();
+    if (!ats || !slug) { alert('Pick a platform and enter a slug first.'); return; }
+    const res = await fetch('/api/resolve-companies', { method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ companies: [{ name, slug, ats }] }) });
+    const data = await res.json();
+    if (data.ok) row.innerHTML = `<div style="color:var(--good);font-size:12.5px">✓ ${esc(name)} added</div>`;
+  }));
+}
+
+// ---- pre-fill from existing config/profile ------------------------------
+let editingExisting = false;
+async function boot() {
+  let data;
+  try {
+    data = await (await fetch('/api/config')).json();
+  } catch (err) { return; }
+  if (!data.configured) return;
+  editingExisting = true;
+
+  const p = data.profile, c = data.config;
+  document.getElementById('page-sub').textContent =
+    'Editing your existing setup. Saving will overwrite config.json and profile.json.';
+  document.getElementById('submit').textContent = 'Test your connection above first';
+
+  document.getElementById('in-name').value = p.name || '';
+  const ct = p.contact || {};
+  document.getElementById('in-c_location').value = ct.location || '';
+  document.getElementById('in-c_email').value = ct.email || '';
+  document.getElementById('in-c_phone').value = ct.phone || '';
+  document.getElementById('in-c_linkedin').value = ct.linkedin || '';
+  document.getElementById('in-headline').value = p.headline || '';
+  document.getElementById('in-years').value = p.years_experience || '';
+  document.getElementById('in-skills').value = (p.skills || []).join(', ');
+  document.getElementById('in-summary').value = p.summary || '';
+  document.getElementById('in-education').value = (p.education || []).join('\n');
+  document.getElementById('in-certs').value = (p.certifications || []).join('\n');
+  document.getElementById('in-notes').value = p.notes_for_ai || '';
+
+  expList.innerHTML = ''; expCounter = 0;
+  const exps = p.experience || [];
+  if (exps.length) {
+    for (const e of exps) {
+      addExp({ company: e.company, title: e.title,
+               dates: `${e.start||''} to ${e.end||'Present'}`, highlights: e.highlights || [] });
+    }
+  } else {
+    addExp();
+  }
+
+  document.getElementById('in-titles').value = (c.title_include || []).join(', ');
+  document.getElementById('in-locs').value = (c.location_filter || []).join(', ');
+  document.getElementById('in-targets').value = (c.target_companies || []).join(', ');
+
+  if ((c.ai || {}).ollama_host) existingOllamaHost = c.ai.ollama_host;
+
+  const backend = (c.ai || {}).backend || 'ollama';
+  const radio = document.querySelector(`input[name=ai_backend_radio][value="${backend}"]`);
+  if (radio) radio.checked = true;
+  updateBackendUI();
+  if (backend === 'ollama') {
+    document.getElementById('in-model-ollama').value = (c.ai || {}).model || 'mistral-nemo';
+  } else {
+    const modelSel = document.getElementById('in-model-cloud');
+    const model = (c.ai || {}).model || '';
+    if ([...modelSel.options].some(o => o.value === model)) modelSel.value = model;
+    else { modelSel.value = '__other__'; document.getElementById('cloud-model-custom').style.display = '';
+           document.getElementById('in-model-custom').value = model; }
+  }
+}
+addExp(); // default: one blank row before boot() may replace it
+updateBackendUI();
+boot();
+
+function splitLines(id) {
+  return (document.getElementById(id).value || '').split('\n').map(s => s.trim()).filter(Boolean);
+}
+function splitCommas(id) {
+  return (document.getElementById(id).value || '').split(',').map(s => s.trim()).filter(Boolean);
 }
 
 document.getElementById('f').addEventListener('submit', async (e) => {
   e.preventDefault();
+  if (editingExisting && !confirm('This will overwrite your existing config.json and profile.json. Continue?')) return;
+
   const btn = document.getElementById('submit');
   const status = document.getElementById('status');
   btn.disabled = true;
   status.textContent = 'Saving...';
   status.className = 'status';
+
+  // Block silent data loss: an entry with highlights but no company/title used to
+  // vanish quietly on submit. Now it blocks saving instead.
+  const incomplete = [...expList.children].filter(div => {
+    const c = div.querySelector('.exp-company').value.trim();
+    const t = div.querySelector('.exp-title').value.trim();
+    const h = div.querySelector('.exp-highlights').value.trim();
+    div.classList.toggle('incomplete', Boolean((!c || !t) && h));
+    return (!c || !t) && h;
+  });
+  if (incomplete.length) {
+    status.className = 'status err';
+    status.textContent = 'One or more experience entries has highlights but no company/title — fill those in or remove the entry before saving.';
+    btn.disabled = false;
+    return;
+  }
 
   const experience = [...expList.children].map(div => ({
     company: div.querySelector('.exp-company').value,
@@ -186,26 +531,26 @@ document.getElementById('f').addEventListener('submit', async (e) => {
   })).filter(e => e.company && e.title);
 
   const payload = {
-    name: document.querySelector('[name=name]').value,
+    name: document.getElementById('in-name').value,
     contact: {
-      location: document.querySelector('[name=c_location]').value,
-      email: document.querySelector('[name=c_email]').value,
-      phone: document.querySelector('[name=c_phone]').value,
-      linkedin: document.querySelector('[name=c_linkedin]').value,
+      location: document.getElementById('in-c_location').value,
+      email: document.getElementById('in-c_email').value,
+      phone: document.getElementById('in-c_phone').value,
+      linkedin: document.getElementById('in-c_linkedin').value,
     },
-    headline: document.querySelector('[name=headline]').value,
-    years_experience: Number(document.querySelector('[name=years_experience]').value) || 0,
-    summary: document.querySelector('[name=summary]').value,
-    skills: splitCommas('skills'),
+    headline: document.getElementById('in-headline').value,
+    years_experience: Number(document.getElementById('in-years').value) || 0,
+    summary: document.getElementById('in-summary').value,
+    skills: splitCommas('in-skills'),
     experience,
-    education: splitLines('education'),
-    certifications: splitLines('certifications'),
-    notes_for_ai: document.querySelector('[name=notes_for_ai]').value,
-    title_include: splitCommas('title_include'),
-    location_filter: splitCommas('location_filter'),
-    target_companies: splitCommas('target_companies'),
-    ai_backend: document.getElementById('ai_backend').value,
-    ai_model: document.getElementById('ai_model').value,
+    education: splitLines('in-education'),
+    certifications: splitLines('in-certs'),
+    notes_for_ai: document.getElementById('in-notes').value,
+    title_include: splitCommas('in-titles'),
+    location_filter: splitCommas('in-locs'),
+    target_companies: splitCommas('in-targets'),
+    ai_backend: selectedBackend(),
+    ai_model: selectedModel(),
   };
 
   try {
@@ -213,8 +558,18 @@ document.getElementById('f').addEventListener('submit', async (e) => {
     const data = await res.json();
     if (!res.ok || data.error) throw new Error(data.error || 'save failed');
     status.className = 'status ok';
-    status.textContent = data.note ? `Saved. ${data.note}` : 'Saved. Redirecting...';
-    setTimeout(() => { window.location.href = 'index.html?justSetUp=1'; }, data.note ? 2200 : 600);
+    if (data.unmatched_companies && data.unmatched_companies.length) {
+      renderUnmatchedPanel(data.unmatched_companies);
+      status.textContent = `Saved. ${data.note} Resolve them above, or continue to your results.`;
+      const goBtn = document.createElement('a');
+      goBtn.href = 'index.html?justSetUp=1';
+      goBtn.textContent = 'Continue to results →';
+      goBtn.style.cssText = 'display:block;text-align:center;margin-top:10px;color:var(--accent)';
+      status.after(goBtn);
+    } else {
+      status.textContent = 'Saved. Redirecting...';
+      setTimeout(() => { window.location.href = 'index.html?justSetUp=1'; }, 600);
+    }
   } catch (err) {
     status.className = 'status err';
     status.textContent = 'Could not save: ' + err.message;
