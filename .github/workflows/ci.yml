@@ -4,6 +4,7 @@ jobs:
   smoke-test:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         python-version: ["3.9", "3.11", "3.12"]
     steps:
@@ -59,7 +60,9 @@ jobs:
           python jobradar.py serve --port 8765 & echo $! > /tmp/serve.pid
           sleep 2
           job=$(python -c "import json; print(json.dumps({'job': json.load(open('data/results.json'))['jobs'][0]}))")
-          out=$(curl -sf -X POST -H 'Content-Type: application/json' -d "$job" http://localhost:8765/api/tailor)
+          # no -f here on purpose: a 502 with a JSON error body is the expected, correct response
+          # when no AI backend is reachable, and -f would discard that body before grep sees it.
+          out=$(curl -s -X POST -H 'Content-Type: application/json' -d "$job" http://localhost:8765/api/tailor)
           echo "$out"
           echo "$out" | grep -qi '"error"' \
             || (echo "expected a JSON error field, got something else"; kill $(cat /tmp/serve.pid); exit 1)
