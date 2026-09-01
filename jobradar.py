@@ -65,6 +65,15 @@ def _json_error(path, e):
         f"setup page) to start clean.")
 
 
+def _strip_notes(d):
+    """Drop jobradar's own `_..._note`/`_readme` documentation keys. These
+    exist only to explain fields inline in examples/*.example.json — a live
+    config.json or profile.json should never carry them. Shared by cmd_init
+    (raw file copy) and webapp.py's setup-form write path so the two can't
+    drift out of sync again."""
+    return {k: v for k, v in d.items() if not k.startswith("_")}
+
+
 def load_config(path):
     if not Path(path).exists():
         raise ConfigError(f"No config at {path}. Run `python3 jobradar.py init` first.")
@@ -147,7 +156,8 @@ def cmd_init(args):
         if dst.exists():
             print(f"skip (exists): {dst.name}")
             continue
-        dst.write_text(src.read_text())
+        data = _strip_notes(json.loads(src.read_text()))
+        dst.write_text(json.dumps(data, indent=2) + "\n")
         print(f"created: {dst.name}")
     print("\nEdit config.json (target companies, location, AI backend) and profile.json "
           "(your real background), then run: python3 jobradar.py scan")

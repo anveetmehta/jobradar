@@ -43,6 +43,16 @@ jobs:
         run: |
           python jobradar.py init
           test -f config.json && test -f profile.json
+      - name: init strips example-file _..._note/_readme keys, doesn't leave permanent clutter
+        run: |
+          python -c "
+          import json
+          for f in ('config.json', 'profile.json'):
+              d = json.load(open(f))
+              bad = [k for k in d if k.startswith('_')]
+              assert not bad, f'{f} still has note keys: {bad}'
+          print('no note-key clutter in either file')
+          "
       - name: web UI reports configured after init, serves the setup + main pages, includes full payload for pre-fill
         run: |
           python jobradar.py serve --port 8765 & echo $! > /tmp/serve.pid

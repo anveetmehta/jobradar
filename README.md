@@ -35,6 +35,10 @@ explicitly not to invent qualifications you don't have, and to name real gaps
 
 ## Quickstart
 
+> **Windows:** `install.sh` is a bash script and won't run under plain
+> `cmd`/PowerShell. Run the three commands under it by hand instead (works
+> in PowerShell, Git Bash, or WSL) — see below.
+
 ```bash
 git clone https://github.com/anveetmehta/jobradar.git
 cd jobradar
@@ -44,9 +48,12 @@ cd jobradar
 That's it — `install.sh` creates a virtual environment if you don't have one
 yet, installs dependencies, and opens `http://localhost:8765`. Run it again
 any time as your normal "start jobradar" command; it won't redo the setup
-work if nothing's changed. (No shell script? Same three steps by hand:
+work if nothing's changed. If it says "permission denied," run
+`chmod +x install.sh` once first. (No shell script, or on Windows? Same
+three steps by hand:
 `python3 -m venv .venv`, `.venv/bin/pip install -r requirements.txt`,
-`.venv/bin/python jobradar.py serve`.)
+`.venv/bin/python jobradar.py serve` — on Windows substitute
+`.venv\Scripts\` for `.venv/bin/`.)
 
 With no `config.json`/`profile.json` present yet, it redirects to a setup
 page — your background, the job titles and companies you want, and your AI
@@ -56,7 +63,7 @@ Both are gitignored — your job search is never committed, even if you fork
 this repo.
 
 Right after setup it kicks off an instant keyword-only preview automatically
-so you're not staring at an empty page — click **Full AI scan** on the same
+so you're not staring at an empty page — click **Full scan** on the same
 screen when you want real, explained scoring (takes a few minutes the first
 time it downloads the job index; fast after that). Everything — setup,
 scanning, browsing, tailoring — happens in the browser. No terminal beyond
@@ -232,6 +239,36 @@ are a cheap pre-filter before any AI call is spent; `ai.max_jobs_to_score`
 caps how many postings actually get scored (ranked into that budget by a
 quick keyword prescreen first); `target_companies` pins matches to the top of
 the list regardless of score, badged in the UI.
+
+### Worked example
+
+A Bengaluru-based senior PM who only wants payments/fintech roles at a
+specific shortlist of companies, free local AI, and a resume that starts at
+compact density since their profile always runs long:
+
+```json
+{
+  "location_filter": ["bengaluru", "bangalore", "blr"],
+  "title_include": ["product manager", "senior product manager", "principal product"],
+  "title_exclude": ["intern", "junior", "new grad"],
+  "ai": { "backend": "ollama", "model": "mistral-nemo", "min_score": 55 },
+  "target_companies": ["Razorpay", "Stripe", "Nium"],
+  "ats_companies": [
+    { "name": "Razorpay", "slug": "razorpaysoftwareprivatelimited", "ats": "greenhouse" },
+    { "name": "Stripe",   "slug": "stripe",   "ats": "greenhouse" },
+    { "name": "Nium",     "slug": "nium",     "ats": "lever" }
+  ],
+  "render": { "preferred_density": "compact" }
+}
+```
+
+The five fields that matter most day to day: `location_filter` and
+`title_include` decide what you even see; `ai.min_score` decides the cutoff
+below which a role is hidden (not deleted — see "hidden below your cutoff"
+in the web UI); `target_companies` + `ats_companies` together are what makes
+`watch` actually alert on a specific company (the first without the second
+does nothing); `render.preferred_density` (new in this pass) skips the
+normal-density attempt entirely when you already know your resume runs long.
 
 ## What this deliberately does not do
 

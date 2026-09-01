@@ -243,10 +243,7 @@ class Handler(BaseHTTPRequestHandler):
             except (json.JSONDecodeError, OSError):
                 pass  # a broken existing config.json shouldn't block writing a fresh one
 
-        cfg = dict(example_cfg)
-        for k in list(cfg.keys()):
-            if k.startswith("_"):
-                cfg.pop(k)
+        cfg = jr._strip_notes(example_cfg)
         cfg["location_filter"] = [s.strip() for s in body.get("location_filter", []) if s.strip()]
         cfg["title_include"] = [s.strip() for s in body.get("title_include", []) if s.strip()] \
             or cfg["title_include"]

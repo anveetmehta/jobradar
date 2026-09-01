@@ -17,7 +17,11 @@ if [ ! -d .venv ]; then
 fi
 
 echo "Installing dependencies..."
-.venv/bin/pip install -q -r requirements.txt
+.venv/bin/pip install -q -r requirements.txt || {
+  echo "Dependency install failed — re-running verbosely so you can see why:" >&2
+  .venv/bin/pip install -r requirements.txt
+  exit 1
+}
 
 echo
 echo "Starting jobradar — opening http://localhost:8765"
