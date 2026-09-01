@@ -1,5 +1,9 @@
 # jobradar
 
+[![ci](https://github.com/anveetmehta/jobradar/actions/workflows/ci.yml/badge.svg)](https://github.com/anveetmehta/jobradar/actions/workflows/ci.yml)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org)
+
 Local, AI-matched job discovery. Pulls open roles from public job-board APIs
 and a large daily-refreshed index, scores each one against **your actual
 profile** with an LLM — free and local via Ollama, or your own Anthropic/OpenAI
