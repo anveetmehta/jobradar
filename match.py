@@ -74,58 +74,71 @@ def _extract_json(text):
     return None
 
 
-def _call_ollama(prompt, model, host):
+def _call_ollama(system_prompt, prompt, model, host):
     r = requests.post(f"{host.rstrip('/')}/api/generate", timeout=TIMEOUT, json={
-        "model": model, "system": SYSTEM_PROMPT, "prompt": prompt,
+        "model": model, "system": system_prompt, "prompt": prompt,
         "format": "json", "stream": False, "options": {"temperature": 0.1},
     })
     r.raise_for_status()
     return r.json().get("response", "")
 
 
-def _call_anthropic(prompt, model, api_key):
+def _call_anthropic(system_prompt, prompt, model, api_key):
     r = requests.post("https://api.anthropic.com/v1/messages", timeout=TIMEOUT,
                       headers={"x-api-key": api_key, "anthropic-version": "2023-06-01",
                               "content-type": "application/json"},
-                      json={"model": model, "max_tokens": 500, "system": SYSTEM_PROMPT,
+                      json={"model": model, "max_tokens": 1500, "system": system_prompt,
                            "messages": [{"role": "user", "content": prompt}]})
     r.raise_for_status()
     return "".join(b.get("text", "") for b in r.json().get("content", []))
 
 
-def _call_openai(prompt, model, api_key):
+def _call_openai(system_prompt, prompt, model, api_key):
     r = requests.post("https://api.openai.com/v1/chat/completions", timeout=TIMEOUT,
                       headers={"Authorization": f"Bearer {api_key}",
                               "content-type": "application/json"},
                       json={"model": model, "temperature": 0.1,
                            "response_format": {"type": "json_object"},
-                           "messages": [{"role": "system", "content": SYSTEM_PROMPT},
+                           "messages": [{"role": "system", "content": system_prompt},
                                        {"role": "user", "content": prompt}]})
     r.raise_for_status()
     return r.json()["choices"][0]["message"]["content"]
+
+
+def call_llm(system_prompt, prompt, ai_config, api_key=None):
+    """Shared dispatch used by both job-fit scoring and resume/cover-letter
+    generation. Raises RuntimeError on a missing key or unknown backend,
+    requests.RequestException on a network/HTTP failure — callers decide how
+    to degrade."""
+    backend = ai_config.get("backend", "ollama")
+    model = ai_config.get("model", "")
+    if backend == "ollama":
+        return _call_ollama(system_prompt, prompt, model,
+                            ai_config.get("ollama_host", "http://localhost:11434"))
+    if backend == "anthropic":
+        if not api_key:
+            raise RuntimeError("ANTHROPIC_API_KEY not set")
+        return _call_anthropic(system_prompt, prompt, model, api_key)
+    if backend == "openai":
+        if not api_key:
+            raise RuntimeError("OPENAI_API_KEY not set")
+        return _call_openai(system_prompt, prompt, model, api_key)
+    raise RuntimeError(f"unknown backend {backend!r}")
+
+
+def extract_json(text):
+    return _extract_json(text)
 
 
 def score_job(profile_text, job_rec, description, ai_config, api_key=None):
     """-> dict with score/verdict/why/gaps, plus "error" set on failure (score
     then defaults to None so the caller can fall back to keyword-only ranking)."""
     prompt = _build_user_prompt(profile_text, job_rec, description)
-    backend = ai_config.get("backend", "ollama")
-    model = ai_config.get("model", "")
 
     try:
-        if backend == "ollama":
-            raw = _call_ollama(prompt, model, ai_config.get("ollama_host",
-                                                            "http://localhost:11434"))
-        elif backend == "anthropic":
-            if not api_key:
-                return {"error": "ANTHROPIC_API_KEY not set", "score": None}
-            raw = _call_anthropic(prompt, model, api_key)
-        elif backend == "openai":
-            if not api_key:
-                return {"error": "OPENAI_API_KEY not set", "score": None}
-            raw = _call_openai(prompt, model, api_key)
-        else:
-            return {"error": f"unknown backend {backend!r}", "score": None}
+        raw = call_llm(SYSTEM_PROMPT, prompt, ai_config, api_key)
+    except RuntimeError as e:
+        return {"error": str(e), "score": None}
     except requests.exceptions.RequestException as e:
         return {"error": f"{type(e).__name__}: {e}", "score": None}
 

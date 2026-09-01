@@ -4,9 +4,11 @@ Local, AI-matched job discovery. Pulls open roles from public job-board APIs
 and a large daily-refreshed index, scores each one against **your actual
 profile** with an LLM — free and local via Ollama, or your own Anthropic/OpenAI
 key — and gives you a ranked, explained shortlist in a small local web page.
+When you find one worth applying to, `tailor` generates a resume and cover
+letter grounded in your real background, verified to fit exactly one page.
 
-No login. No scraping by default. **No auto-applying, ever** — this tool finds
-and ranks roles; you decide what to do with them.
+No login. No scraping by default. **No auto-applying, ever** — this tool finds,
+ranks, and helps you write for roles; you decide what to submit.
 
 ![jobradar UI](docs/screenshot.png)
 
@@ -38,6 +40,8 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python jobradar.py verify    # sanity-check your ATS company list
 .venv/bin/python jobradar.py scan      # fetch + AI-score + rank -> data/results.json
 .venv/bin/python jobradar.py serve     # opens http://localhost:8765 with the ranked list
+
+.venv/bin/python jobradar.py tailor 3  # one-page resume + cover letter for result #3
 ```
 
 `config.json` and `profile.json` are gitignored — they hold your job search
@@ -82,6 +86,50 @@ preference, "flag it if the role wants N+ years more than I have"). See
 as honest as what you put here** — the model is instructed not to invent
 anything beyond it, so a thin profile produces thin, low-confidence scoring.
 
+## Tailoring a resume and cover letter
+
+```bash
+jobradar.py tailor 3                 # tailor for result #3 from your last `scan`
+jobradar.py tailor https://...        # or tailor directly against any posting URL
+```
+
+For the chosen posting, the AI reads your `profile.json` and the real job
+description, then selects, reorders, and lightly tightens your **existing**
+bullets and skills for relevance — it does not invent new ones. Output goes
+to `output/<company>_<role>_resume.html` and `..._cover_letter.html`
+(gitignored, personal to your run).
+
+**One page, verified, not asserted.** Each file is rendered with a headless
+browser (Chrome, Chromium, or Edge — whichever is already on your machine)
+and its actual page count is measured. If it doesn't fit, jobradar retries at
+a tighter type density, then trims the lowest-priority bullet or paragraph
+one at a time — re-measuring after every change — until it fits or a small
+cut budget runs out. If no browser is found at all, jobradar says so
+explicitly rather than silently shipping an unverified file.
+
+**Read the output before you send it — this is not optional.** Testing this
+against a free local 7B model (`mistral-nemo`) surfaced a real failure: in
+one run, the model added "AI tools" to the skills line — a skill genuinely
+absent from the test profile — in the same response where it correctly
+listed "no AI tools experience" as an unmet requirement. A separate run's
+cover letter, while honestly acknowledging a stated experience gap, then
+softened it with *"I've used other AI tools"* — a claim the profile never
+made. Prompt instructions alone don't reliably stop this.
+
+jobradar now runs two automated checks after generation, and reports what
+they catch:
+- `skills_line` is hard-filtered against your actual `profile.json` skills —
+  anything the model adds that isn't really there is stripped, and you're
+  told what was removed.
+- Generated cover-letter text is scanned for "I've used X" / "I have
+  experience with X" phrasing where X doesn't trace back to anything in your
+  profile, and flagged as a warning for you to check.
+
+The second check is a heuristic, not a guarantee — it catches the pattern
+found in testing, not every possible way a model could embellish. Treat
+`jobradar.py tailor`'s output as a strong first draft from someone who read
+your resume carefully, not as ground truth ready to submit unread.
+
 ## Sources — what's queried, and the tradeoffs
 
 | source | what it is | risk |
@@ -102,6 +150,8 @@ jobradar.py scan --fast         skip AI scoring entirely (instant, keyword rank 
 jobradar.py scan --fresh        bypass the cached index download and re-fetch it
 jobradar.py verify              health-check every board in ats_companies
 jobradar.py serve [--port N]    serve the web UI (default http://localhost:8765)
+jobradar.py tailor <ref>        one-page resume + cover letter; ref is a result
+                                 number from the last scan, or a posting URL
 ```
 
 ## Config reference
@@ -123,7 +173,11 @@ the list regardless of score, badged in the UI.
   off by default, and is documented as such above.
 - **No telemetry.** Nothing about your search, profile, or results leaves
   your machine except the API calls you configure (Ollama stays local;
-  Anthropic/OpenAI only if you choose those backends).
+  Anthropic/OpenAI only if you choose those backends). Your `contact` block
+  (email/phone/LinkedIn) is used only to render the resume/cover-letter
+  header locally — it is never included in what's sent to an AI backend.
+- **`tailor` never submits anything.** It writes files to `output/` for you
+  to review, open, and send yourself.
 
 ## Contributing
 

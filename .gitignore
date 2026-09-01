@@ -11,3 +11,4 @@ profile.json
 .cache/
 data/*.json
 !data/.gitkeep
+output/

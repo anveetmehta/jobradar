@@ -14,8 +14,11 @@ Usage:
   python3 jobradar.py scan --fresh         bypass the cached index download
   python3 jobradar.py verify               health-check the ATS boards in your config
   python3 jobradar.py serve                serve the local web UI at http://localhost:8765
+  python3 jobradar.py tailor 3             tailor a one-page resume + cover letter for
+                                            result #3 from your last scan (or pass a URL)
 """
 import argparse
+import datetime
 import json
 import os
 import re
@@ -30,6 +33,8 @@ sys.path.insert(0, str(HERE))
 
 from sources import ats, index_source, jobspy_source, description  # noqa: E402
 import match  # noqa: E402
+import resume  # noqa: E402
+import fit  # noqa: E402
 
 
 def load_config(path):
@@ -230,6 +235,106 @@ def cmd_scan(args):
     print("\nRun `python3 jobradar.py serve` to browse the full ranked list with reasoning.")
 
 
+def _slug(s):
+    return re.sub(r"-{2,}", "-", re.sub(r"[^a-z0-9]+", "-", s.lower())).strip("-") or "role"
+
+
+def _resolve_job(ref, base_dir, results_path):
+    """ref is either an http(s) URL, or a 1-based index into the last scan's
+    ranked results.json."""
+    if ref.startswith("http://") or ref.startswith("https://"):
+        return {"title": "", "company": "", "location": "", "url": ref, "source": "manual"}
+    rpath = base_dir / results_path
+    if not rpath.exists():
+        sys.exit(f"No {rpath} yet — run `python3 jobradar.py scan` first, or pass a full URL.")
+    jobs = json.loads(rpath.read_text()).get("jobs", [])
+    try:
+        idx = int(ref) - 1
+        assert 0 <= idx < len(jobs)
+    except (ValueError, AssertionError):
+        sys.exit(f"'{ref}' isn't a valid result number (1-{len(jobs)}) or a URL.")
+    return jobs[idx]
+
+
+def cmd_tailor(args):
+    cfg = load_config(args.config)
+    base_dir = Path(args.config).parent
+    profile = load_profile(cfg, base_dir)
+    profile_text = profile_to_text(profile)
+    ai_cfg = cfg.get("ai", {})
+
+    api_key = None
+    if ai_cfg.get("backend") == "anthropic":
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+    elif ai_cfg.get("backend") == "openai":
+        api_key = os.environ.get("OPENAI_API_KEY")
+
+    job_rec = _resolve_job(args.ref, base_dir, args.results)
+    if not job_rec.get("title") or not job_rec.get("company"):
+        print("[tailor] fetching posting to identify role/company...", file=sys.stderr)
+    desc = description.fetch(job_rec["url"]) if job_rec.get("url") else ""
+    print(f"[tailor] {job_rec.get('title') or '(unknown title)'} @ "
+          f"{job_rec.get('company') or '(unknown company)'} — generating with "
+          f"{ai_cfg.get('backend','ollama')}/{ai_cfg.get('model','')}...", file=sys.stderr)
+
+    resume_content = resume.build_resume(profile_text, job_rec, desc, ai_cfg, api_key)
+    if resume_content.get("error"):
+        sys.exit(f"Could not generate resume content: {resume_content['error']}\n"
+                 f"Check your ai.backend config — for Ollama, is `ollama serve` running and "
+                 f"the model pulled? For Anthropic/OpenAI, is the API key env var set?")
+
+    removed_skills = resume.validate_resume(resume_content, profile)
+    if removed_skills:
+        print(f"[resume] removed {len(removed_skills)} skill(s) the model added that aren't "
+             f"in your profile: {', '.join(removed_skills)}", file=sys.stderr)
+
+    letter_content = resume.build_cover_letter(profile_text, job_rec, desc, ai_cfg, api_key)
+    if not letter_content.get("error"):
+        claim_flags = resume.scan_for_unverified_claims(
+            " ".join([letter_content.get("opening", "")] + letter_content.get("body", [])
+                    + [letter_content.get("closing", ""), letter_content.get("acknowledge_gap", "")]),
+            profile)
+        if claim_flags:
+            print(f"[cover letter] WARNING — possibly unverified experience claim(s), "
+                 f"check before sending:", file=sys.stderr)
+            for c in claim_flags:
+                print(f"    \"{c}\"", file=sys.stderr)
+
+    out_dir = base_dir / args.out_dir
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stub = f"{_slug(job_rec.get('company', 'company'))}_{_slug(job_rec.get('title', 'role'))}"
+
+    r = fit.fit_resume(profile, resume_content, out_dir / f"{stub}_resume.html",
+                       title=f"{profile.get('name','')} — resume")
+    cuts_note = f", {r['cuts_made']} cut(s)" if r["cuts_made"] else ""
+    print(f"\n[resume] {r['pages'] or '?'} page(s), {r['density']} density{cuts_note} "
+         f"-> {r['html_path']}")
+    for w in r["warnings"]:
+        print(f"  ! {w}")
+
+    if letter_content.get("error"):
+        print(f"\n[cover letter] generation failed: {letter_content['error']}")
+    else:
+        today = datetime.date.today().strftime("%d %B %Y")
+        c = fit.fit_cover_letter(profile, letter_content, job_rec,
+                                 out_dir / f"{stub}_cover_letter.html", date_str=today)
+        cuts_note = f", {c['cuts_made']} cut(s)" if c["cuts_made"] else ""
+        print(f"\n[cover letter] {c['pages'] or '?'} page(s), {c['density']} density"
+             f"{cuts_note} -> {c['html_path']}")
+        for w in c["warnings"]:
+            print(f"  ! {w}")
+
+    if resume_content.get("unmet_requirements"):
+        print("\n[unmet requirements — the posting asks for these, your profile doesn't "
+              "support them]")
+        for g in resume_content["unmet_requirements"]:
+            print(f"  - {g}")
+
+    print(f"\nOpen the .html file(s) in a browser to review before sending. If a .pdf was "
+         f"produced alongside it, that's your verified one-page output; otherwise print to "
+         f"PDF yourself with margins set to None.")
+
+
 def cmd_serve(args):
     os.chdir(HERE)
     handler = SimpleHTTPRequestHandler
@@ -264,8 +369,15 @@ def main():
     se = sub.add_parser("serve")
     se.add_argument("--port", type=int, default=8765)
 
+    ta = sub.add_parser("tailor", help="generate a tailored one-page resume + cover letter")
+    ta.add_argument("ref", help="a result number from the last `scan` (e.g. 3), or a full "
+                                "job posting URL")
+    ta.add_argument("--out-dir", default="output")
+    ta.add_argument("--results", default="data/results.json")
+
     args = ap.parse_args()
-    {"init": cmd_init, "scan": cmd_scan, "verify": cmd_verify, "serve": cmd_serve}[args.cmd](args)
+    {"init": cmd_init, "scan": cmd_scan, "verify": cmd_verify, "serve": cmd_serve,
+     "tailor": cmd_tailor}[args.cmd](args)
 
 
 if __name__ == "__main__":

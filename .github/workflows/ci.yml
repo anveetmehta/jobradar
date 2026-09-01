@@ -10,7 +10,7 @@ jobs:
           python-version: "3.11"
       - run: pip install -r requirements.txt
       - name: compile check
-        run: python -m py_compile jobradar.py match.py sources/*.py
+        run: python -m py_compile jobradar.py match.py resume.py render.py fit.py pdf.py sources/*.py
       - name: example config/profile are valid JSON
         run: |
           python -c "import json; json.load(open('examples/config.example.json'))"
@@ -23,3 +23,12 @@ jobs:
         run: python jobradar.py verify
       - name: fast scan runs end-to-end without an AI backend
         run: python jobradar.py scan --fast
+      - name: tailor fails cleanly (no controlled error, no traceback) with no AI backend up
+        run: |
+          set +e
+          out=$(python jobradar.py tailor 1 2>&1)
+          code=$?
+          echo "$out"
+          test $code -ne 0 || (echo "expected a non-zero exit with no AI backend reachable"; exit 1)
+          echo "$out" | grep -qi "Could not generate resume content" \
+            || (echo "expected the controlled error message, got a traceback or something else"; exit 1)

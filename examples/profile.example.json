@@ -2,6 +2,14 @@
   "_readme": "Copy to ../profile.json (or run `python3 jobradar.py init`) and replace every field with YOUR real background. This is a fictional example — the AI matcher is only as honest as what you put here, and it is instructed not to invent anything beyond it.",
 
   "name": "Jordan Rivera",
+  "contact": {
+    "location": "Bengaluru, India",
+    "email": "jordan.rivera@example.com",
+    "phone": "+91-00000-00000",
+    "linkedin": "linkedin.com/in/jordanrivera-example"
+  },
+  "_contact_note": "Used only by `jobradar.py tailor` to fill the resume/cover-letter header — not sent to the AI backend, not used for job matching.",
+
   "headline": "Senior Product Manager — Payments & Identity Platforms",
   "years_experience": 8,
   "summary": "Product manager with 8 years building payments, onboarding, and compliance platforms in fintech. Owned a platform processing millions of transactions annually across multiple regions, built to satisfy dozens of local regulatory regimes without forking the codebase per market.",
@@ -38,6 +46,7 @@
   ],
 
   "education": ["MBA, Business Analytics — Example University", "B.Tech, Computer Science"],
+  "certifications": ["Cloud Computing (Example Cert Body)", "SQL (Example Cert Body)"],
 
   "notes_for_ai": "Open to Staff or Director-level individual-contributor or people-management roles. Not interested in pure growth-marketing PM roles. A stated minimum years-of-experience requirement more than 2 years above mine should be flagged as a real gap, not smoothed over."
 }
