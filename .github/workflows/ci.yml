@@ -10,7 +10,7 @@ jobs:
           python-version: "3.11"
       - run: pip install -r requirements.txt
       - name: compile check
-        run: python -m py_compile jobradar.py match.py resume.py render.py fit.py pdf.py sources/*.py
+        run: python -m py_compile jobradar.py match.py resume.py render.py fit.py pdf.py notify.py sources/*.py
       - name: example config/profile are valid JSON
         run: |
           python -c "import json; json.load(open('examples/config.example.json'))"
@@ -32,3 +32,5 @@ jobs:
           test $code -ne 0 || (echo "expected a non-zero exit with no AI backend reachable"; exit 1)
           echo "$out" | grep -qi "Could not generate resume content" \
             || (echo "expected the controlled error message, got a traceback or something else"; exit 1)
+      - name: watch --once completes without crashing (no AI backend, real target-company boards)
+        run: python jobradar.py watch --once

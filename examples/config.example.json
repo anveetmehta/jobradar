@@ -31,10 +31,18 @@
   "_ai_note": "backend: 'ollama' (free, local, needs `ollama pull <model>` first — see README for model recommendations), 'anthropic' (needs ANTHROPIC_API_KEY in your shell env, never in this file), or 'openai' (needs OPENAI_API_KEY). max_jobs_to_score caps how many postings get a real AI call, ranked by a cheap keyword prescreen first — raise it if you have API budget or patience for a local model. min_score filters the final list.",
 
   "target_companies": ["Stripe", "Razorpay", "Airwallex", "Nium", "Persona", "Socure"],
-  "_target_note": "Case-insensitive substring match against company name. Matches are pinned to the top of the results and badged, regardless of AI score.",
+  "_target_note": "Case-insensitive substring match against company name. Matches are pinned to the top of `scan` results and badged. `watch` alerts specifically on these — every target company needs an entry in ats_companies below, or `watch` will never see it (it polls ats_companies live; it does not re-download the whole daily index on every poll).",
+
+  "watch": {
+    "poll_interval_minutes": 60,
+    "auto_tailor": true,
+    "notify": { "desktop": true, "webhook_url": "" }
+  },
+  "_watch_note": "`jobradar.py watch` polls ats_companies for postings at your target_companies and never re-alerts on the same URL twice (data/seen_urls.json). auto_tailor: true runs `tailor` automatically the moment a new target-company role appears, so materials are ready when you see the alert. notify.desktop uses a native OS notification (macOS/Linux/Windows, best-effort). notify.webhook_url accepts a Slack or Discord incoming-webhook URL for a more reliable alert than a desktop popup you might miss — leave empty to skip it. `watch` never applies to anything; it only alerts and prepares files.",
 
   "ats_companies": [
     { "name": "Stripe",          "slug": "stripe",         "ats": "greenhouse" },
+    { "name": "Razorpay",        "slug": "razorpaysoftwareprivatelimited", "ats": "greenhouse" },
     { "name": "Adyen",           "slug": "adyen",          "ats": "greenhouse" },
     { "name": "Affirm",          "slug": "affirm",         "ats": "greenhouse" },
     { "name": "Brex",            "slug": "brex",           "ats": "greenhouse" },

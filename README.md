@@ -6,6 +6,9 @@ profile** with an LLM — free and local via Ollama, or your own Anthropic/OpenA
 key — and gives you a ranked, explained shortlist in a small local web page.
 When you find one worth applying to, `tailor` generates a resume and cover
 letter grounded in your real background, verified to fit exactly one page.
+`watch` is the radar: it polls the companies you're actually waiting on and
+tells you the moment a matching role opens — with materials already
+prepared.
 
 No login. No scraping by default. **No auto-applying, ever** — this tool finds,
 ranks, and helps you write for roles; you decide what to submit.
@@ -42,6 +45,7 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python jobradar.py serve     # opens http://localhost:8765 with the ranked list
 
 .venv/bin/python jobradar.py tailor 3  # one-page resume + cover letter for result #3
+.venv/bin/python jobradar.py watch     # radar: alert + auto-tailor on new target-company roles
 ```
 
 `config.json` and `profile.json` are gitignored — they hold your job search
@@ -130,6 +134,38 @@ found in testing, not every possible way a model could embellish. Treat
 `jobradar.py tailor`'s output as a strong first draft from someone who read
 your resume carefully, not as ground truth ready to submit unread.
 
+## The radar: watching specific companies
+
+```bash
+jobradar.py watch              # polls, alerts, auto-tailors — runs until Ctrl+C
+jobradar.py watch --once       # a single pass, then exit (for your own cron/launchd/Task Scheduler)
+jobradar.py watch --interval 30  # override config.json's watch.poll_interval_minutes
+```
+
+`scan` gives you a fresh snapshot each time you run it. `watch` is different:
+it's for the company you've been checking manually every few days hoping
+they finally open a role. It polls your `target_companies` — specifically
+the ones with an entry in `ats_companies`, since watching needs a live,
+fast, pollable source, not the daily-refreshed index — and remembers every
+posting URL it's already alerted on (`data/seen_urls.json`), so you're never
+notified about the same role twice.
+
+When a genuinely new posting from a target company appears:
+1. It's printed to the console and, per `config.json`'s `watch.notify`
+   block, fired as a native desktop notification and/or posted to a Slack or
+   Discord webhook — desktop notifications are best-effort and easy to miss
+   if you're away from the machine, so a webhook is the more reliable option
+   if you actually want to be paged.
+2. If `watch.auto_tailor` is true (the default), a resume and cover letter
+   are generated immediately — the same `tailor` pipeline, same one-page
+   verification, same fabrication guards — so they're sitting in `output/`
+   by the time you see the alert.
+
+`watch` never applies to anything. It alerts and prepares files; you decide
+whether and how to apply. For a company not already worth adding to
+`ats_companies`, `watch` simply won't see it — this is a radar for specific
+companies you name, not a general listener.
+
 ## Sources — what's queried, and the tradeoffs
 
 | source | what it is | risk |
@@ -152,6 +188,7 @@ jobradar.py verify              health-check every board in ats_companies
 jobradar.py serve [--port N]    serve the web UI (default http://localhost:8765)
 jobradar.py tailor <ref>        one-page resume + cover letter; ref is a result
                                  number from the last scan, or a posting URL
+jobradar.py watch [--once]      radar: alert + auto-tailor on new target_companies roles
 ```
 
 ## Config reference
@@ -176,8 +213,10 @@ the list regardless of score, badged in the UI.
   Anthropic/OpenAI only if you choose those backends). Your `contact` block
   (email/phone/LinkedIn) is used only to render the resume/cover-letter
   header locally — it is never included in what's sent to an AI backend.
-- **`tailor` never submits anything.** It writes files to `output/` for you
-  to review, open, and send yourself.
+- **`tailor` and `watch` never submit anything.** They write files to
+  `output/` for you to review, open, and send yourself — `watch`'s
+  auto-tailor-on-detection is the same thing on a timer, not a step closer
+  to auto-applying.
 
 ## Contributing
 

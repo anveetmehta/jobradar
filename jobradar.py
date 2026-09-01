@@ -16,6 +16,9 @@ Usage:
   python3 jobradar.py serve                serve the local web UI at http://localhost:8765
   python3 jobradar.py tailor 3             tailor a one-page resume + cover letter for
                                             result #3 from your last scan (or pass a URL)
+  python3 jobradar.py watch                poll target_companies for new postings, notify,
+                                            and auto-tailor materials the moment one appears
+  python3 jobradar.py watch --once         a single poll pass — for your own cron/launchd
 """
 import argparse
 import datetime
@@ -23,6 +26,7 @@ import json
 import os
 import re
 import sys
+import time
 import webbrowser
 from concurrent.futures import ThreadPoolExecutor
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
@@ -35,6 +39,7 @@ from sources import ats, index_source, jobspy_source, description  # noqa: E402
 import match  # noqa: E402
 import resume  # noqa: E402
 import fit  # noqa: E402
+import notify  # noqa: E402
 
 
 def load_config(path):
@@ -169,12 +174,7 @@ def cmd_scan(args):
     ai_cfg = cfg.get("ai", {})
     max_score = 0 if args.fast else ai_cfg.get("max_jobs_to_score", 60)
     to_score, rest = candidates[:max_score], candidates[max_score:]
-
-    api_key = None
-    if ai_cfg.get("backend") == "anthropic":
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
-    elif ai_cfg.get("backend") == "openai":
-        api_key = os.environ.get("OPENAI_API_KEY")
+    api_key = _ai_api_key(ai_cfg)
 
     def score_one(j):
         desc = description.fetch(j["url"]) if j["url"] else ""
@@ -256,6 +256,97 @@ def _resolve_job(ref, base_dir, results_path):
     return jobs[idx]
 
 
+def _ai_api_key(ai_cfg):
+    if ai_cfg.get("backend") == "anthropic":
+        return os.environ.get("ANTHROPIC_API_KEY")
+    if ai_cfg.get("backend") == "openai":
+        return os.environ.get("OPENAI_API_KEY")
+    return None
+
+
+def tailor_job(job_rec, profile, profile_text, cfg, base_dir, out_dir_name="output"):
+    """Shared by `tailor` and `watch --auto-tailor`. Returns a report dict;
+    never raises — a failure is reported, not a crash, since `watch` must
+    keep polling regardless of one bad AI call."""
+    ai_cfg = cfg.get("ai", {})
+    api_key = _ai_api_key(ai_cfg)
+    desc = description.fetch(job_rec["url"]) if job_rec.get("url") else ""
+
+    resume_content = resume.build_resume(profile_text, job_rec, desc, ai_cfg, api_key)
+    if resume_content.get("error"):
+        return {"error": resume_content["error"]}
+
+    removed_skills = resume.validate_resume(resume_content, profile)
+    letter_content = resume.build_cover_letter(profile_text, job_rec, desc, ai_cfg, api_key)
+    claim_flags = []
+    if not letter_content.get("error"):
+        claim_flags = resume.scan_for_unverified_claims(
+            " ".join([letter_content.get("opening", "")] + letter_content.get("body", [])
+                    + [letter_content.get("closing", ""), letter_content.get("acknowledge_gap", "")]),
+            profile)
+
+    out_dir = base_dir / out_dir_name
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stub = f"{_slug(job_rec.get('company', 'company'))}_{_slug(job_rec.get('title', 'role'))}"
+
+    resume_report = fit.fit_resume(profile, resume_content, out_dir / f"{stub}_resume.html",
+                                   title=f"{profile.get('name','')} — resume")
+    letter_report = None
+    if not letter_content.get("error"):
+        today = datetime.date.today().strftime("%d %B %Y")
+        letter_report = fit.fit_cover_letter(profile, letter_content, job_rec,
+                                             out_dir / f"{stub}_cover_letter.html",
+                                             date_str=today)
+
+    return {"resume_report": resume_report, "letter_content_error": letter_content.get("error"),
+            "letter_report": letter_report, "removed_skills": removed_skills,
+            "claim_flags": claim_flags,
+            "unmet_requirements": resume_content.get("unmet_requirements", [])}
+
+
+def _print_tailor_report(report):
+    if report.get("error"):
+        print(f"Could not generate resume content: {report['error']}\n"
+             f"Check your ai.backend config — for Ollama, is `ollama serve` running and "
+             f"the model pulled? For Anthropic/OpenAI, is the API key env var set?")
+        return
+    if report["removed_skills"]:
+        print(f"[resume] removed {len(report['removed_skills'])} skill(s) the model added "
+             f"that aren't in your profile: {', '.join(report['removed_skills'])}")
+    if report["claim_flags"]:
+        print("[cover letter] WARNING — possibly unverified experience claim(s), check "
+              "before sending:")
+        for c in report["claim_flags"]:
+            print(f'    "{c}"')
+
+    r = report["resume_report"]
+    cuts_note = f", {r['cuts_made']} cut(s)" if r["cuts_made"] else ""
+    print(f"\n[resume] {r['pages'] or '?'} page(s), {r['density']} density{cuts_note} "
+         f"-> {r['html_path']}")
+    for w in r["warnings"]:
+        print(f"  ! {w}")
+
+    if report["letter_content_error"]:
+        print(f"\n[cover letter] generation failed: {report['letter_content_error']}")
+    elif report["letter_report"]:
+        c = report["letter_report"]
+        cuts_note = f", {c['cuts_made']} cut(s)" if c["cuts_made"] else ""
+        print(f"\n[cover letter] {c['pages'] or '?'} page(s), {c['density']} density"
+             f"{cuts_note} -> {c['html_path']}")
+        for w in c["warnings"]:
+            print(f"  ! {w}")
+
+    if report["unmet_requirements"]:
+        print("\n[unmet requirements — the posting asks for these, your profile doesn't "
+              "support them]")
+        for g in report["unmet_requirements"]:
+            print(f"  - {g}")
+
+    print("\nOpen the .html file(s) in a browser to review before sending. If a .pdf was "
+         "produced alongside it, that's your verified one-page output; otherwise print to "
+         "PDF yourself with margins set to None.")
+
+
 def cmd_tailor(args):
     cfg = load_config(args.config)
     base_dir = Path(args.config).parent
@@ -263,76 +354,92 @@ def cmd_tailor(args):
     profile_text = profile_to_text(profile)
     ai_cfg = cfg.get("ai", {})
 
-    api_key = None
-    if ai_cfg.get("backend") == "anthropic":
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
-    elif ai_cfg.get("backend") == "openai":
-        api_key = os.environ.get("OPENAI_API_KEY")
-
     job_rec = _resolve_job(args.ref, base_dir, args.results)
     if not job_rec.get("title") or not job_rec.get("company"):
         print("[tailor] fetching posting to identify role/company...", file=sys.stderr)
-    desc = description.fetch(job_rec["url"]) if job_rec.get("url") else ""
     print(f"[tailor] {job_rec.get('title') or '(unknown title)'} @ "
           f"{job_rec.get('company') or '(unknown company)'} — generating with "
           f"{ai_cfg.get('backend','ollama')}/{ai_cfg.get('model','')}...", file=sys.stderr)
 
-    resume_content = resume.build_resume(profile_text, job_rec, desc, ai_cfg, api_key)
-    if resume_content.get("error"):
-        sys.exit(f"Could not generate resume content: {resume_content['error']}\n"
-                 f"Check your ai.backend config — for Ollama, is `ollama serve` running and "
-                 f"the model pulled? For Anthropic/OpenAI, is the API key env var set?")
+    report = tailor_job(job_rec, profile, profile_text, cfg, base_dir, args.out_dir)
+    _print_tailor_report(report)
+    if report.get("error"):
+        sys.exit(1)
 
-    removed_skills = resume.validate_resume(resume_content, profile)
-    if removed_skills:
-        print(f"[resume] removed {len(removed_skills)} skill(s) the model added that aren't "
-             f"in your profile: {', '.join(removed_skills)}", file=sys.stderr)
 
-    letter_content = resume.build_cover_letter(profile_text, job_rec, desc, ai_cfg, api_key)
-    if not letter_content.get("error"):
-        claim_flags = resume.scan_for_unverified_claims(
-            " ".join([letter_content.get("opening", "")] + letter_content.get("body", [])
-                    + [letter_content.get("closing", ""), letter_content.get("acknowledge_gap", "")]),
-            profile)
-        if claim_flags:
-            print(f"[cover letter] WARNING — possibly unverified experience claim(s), "
-                 f"check before sending:", file=sys.stderr)
-            for c in claim_flags:
-                print(f"    \"{c}\"", file=sys.stderr)
+def _load_seen(path):
+    if not path.exists():
+        return set()
+    try:
+        return set(json.loads(path.read_text()).get("urls", []))
+    except (json.JSONDecodeError, OSError):
+        return set()
 
-    out_dir = base_dir / args.out_dir
-    out_dir.mkdir(parents=True, exist_ok=True)
-    stub = f"{_slug(job_rec.get('company', 'company'))}_{_slug(job_rec.get('title', 'role'))}"
 
-    r = fit.fit_resume(profile, resume_content, out_dir / f"{stub}_resume.html",
-                       title=f"{profile.get('name','')} — resume")
-    cuts_note = f", {r['cuts_made']} cut(s)" if r["cuts_made"] else ""
-    print(f"\n[resume] {r['pages'] or '?'} page(s), {r['density']} density{cuts_note} "
-         f"-> {r['html_path']}")
-    for w in r["warnings"]:
-        print(f"  ! {w}")
+def _save_seen(path, urls):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"updated": datetime.datetime.now().isoformat(timespec="seconds"),
+                                "urls": sorted(urls)}, indent=1))
 
-    if letter_content.get("error"):
-        print(f"\n[cover letter] generation failed: {letter_content['error']}")
-    else:
-        today = datetime.date.today().strftime("%d %B %Y")
-        c = fit.fit_cover_letter(profile, letter_content, job_rec,
-                                 out_dir / f"{stub}_cover_letter.html", date_str=today)
-        cuts_note = f", {c['cuts_made']} cut(s)" if c["cuts_made"] else ""
-        print(f"\n[cover letter] {c['pages'] or '?'} page(s), {c['density']} density"
-             f"{cuts_note} -> {c['html_path']}")
-        for w in c["warnings"]:
-            print(f"  ! {w}")
 
-    if resume_content.get("unmet_requirements"):
-        print("\n[unmet requirements — the posting asks for these, your profile doesn't "
-              "support them]")
-        for g in resume_content["unmet_requirements"]:
-            print(f"  - {g}")
+def cmd_watch(args):
+    cfg = load_config(args.config)
+    base_dir = Path(args.config).parent
+    profile = load_profile(cfg, base_dir)
+    profile_text = profile_to_text(profile)
+    targets = cfg.get("target_companies", [])
+    ats_companies = cfg.get("ats_companies", [])
+    wcfg = cfg.get("watch", {})
+    auto_tailor = wcfg.get("auto_tailor", True)
+    interval_min = args.interval or wcfg.get("poll_interval_minutes", 60)
+    seen_path = base_dir / "data" / "seen_urls.json"
 
-    print(f"\nOpen the .html file(s) in a browser to review before sending. If a .pdf was "
-         f"produced alongside it, that's your verified one-page output; otherwise print to "
-         f"PDF yourself with margins set to None.")
+    if not targets:
+        sys.exit("config.json's target_companies is empty — `watch` has nothing to alert on. "
+                 "Add the companies you're waiting on there.")
+    watched_ats = [c for c in ats_companies if is_target_company(
+        {"company": c["name"]}, targets)]
+    if not watched_ats:
+        print("[watch] WARNING: none of your target_companies appear in ats_companies — "
+             "watch polls ats_companies directly (fast, live), not the daily index. Add each "
+             "target company's board there or these companies will never be checked.",
+             file=sys.stderr)
+
+    seen = _load_seen(seen_path)
+
+    def one_pass():
+        jobs, errors = ats.fetch_all(ats_companies)
+        candidates = dedupe(prescreen_filter(jobs, cfg))
+        new_hits = [j for j in candidates
+                   if j["url"] and j["url"] not in seen and is_target_company(j, targets)]
+        for j in new_hits:
+            msg = f"{j['title']} — {j['company']} ({j['location'] or 'location n/a'})\n{j['url']}"
+            notify.alert(cfg, "jobradar: new role at a company you're watching", msg)
+            if auto_tailor:
+                print(f"[watch] auto-tailoring for {j['company']}...", file=sys.stderr)
+                report = tailor_job(j, profile, profile_text, cfg, base_dir, args.out_dir)
+                _print_tailor_report(report)
+        seen.update(j["url"] for j in candidates if j["url"])
+        _save_seen(seen_path, seen)
+        if errors:
+            print(f"[watch] boards not responding: {', '.join(errors)}", file=sys.stderr)
+        return new_hits
+
+    if args.once:
+        hits = one_pass()
+        print(f"[watch] done — {len(hits)} new target-company match(es).")
+        return
+
+    print(f"[watch] polling every {interval_min} min for new roles at: {', '.join(targets)}. "
+         f"Ctrl+C to stop.")
+    try:
+        while True:
+            hits = one_pass()
+            if not hits:
+                print(f"[watch] {datetime.datetime.now().strftime('%H:%M')} — nothing new.")
+            time.sleep(interval_min * 60)
+    except KeyboardInterrupt:
+        print("\n[watch] stopped")
 
 
 def cmd_serve(args):
@@ -375,9 +482,15 @@ def main():
     ta.add_argument("--out-dir", default="output")
     ta.add_argument("--results", default="data/results.json")
 
+    wa = sub.add_parser("watch", help="poll target_companies and alert + auto-tailor on new roles")
+    wa.add_argument("--once", action="store_true", help="one poll pass, then exit (for cron/launchd)")
+    wa.add_argument("--interval", type=int, default=None,
+                    help="minutes between polls (default: config.json watch.poll_interval_minutes)")
+    wa.add_argument("--out-dir", default="output")
+
     args = ap.parse_args()
     {"init": cmd_init, "scan": cmd_scan, "verify": cmd_verify, "serve": cmd_serve,
-     "tailor": cmd_tailor}[args.cmd](args)
+     "tailor": cmd_tailor, "watch": cmd_watch}[args.cmd](args)
 
 
 if __name__ == "__main__":
