@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>jobradar</title>
+<style>
+  :root {
+    --bg:#f7f7f5; --panel:#ffffff; --ink:#1a1a1a; --muted:#6b6b6b; --line:#e4e4e0;
+    --accent:#2563eb; --good:#16803c; --ok:#a16207; --weak:#b91c1c; --chip:#eef0ff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#15161a; --panel:#1e1f24; --ink:#eaeaea; --muted:#9a9a9a; --line:#2c2d33;
+            --accent:#7aa2ff; --good:#4ade80; --ok:#facc15; --weak:#f87171; --chip:#26283a; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; }
+  header { padding: 18px 24px; border-bottom: 1px solid var(--line); background: var(--panel);
+           display:flex; align-items:baseline; gap:14px; flex-wrap:wrap; }
+  h1 { font-size: 17px; margin: 0; letter-spacing: .02em; }
+  #meta { color: var(--muted); font-size: 12.5px; }
+  #controls { padding: 12px 24px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;
+              border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top:0; }
+  input, select { background: var(--bg); color: var(--ink); border: 1px solid var(--line);
+                  border-radius: 6px; padding: 6px 9px; font-size: 13px; }
+  #search { flex: 1; min-width: 180px; }
+  main { max-width: 880px; margin: 0 auto; padding: 16px 24px 60px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+          padding: 14px 16px; margin-bottom: 10px; }
+  .row1 { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; }
+  .title { font-weight: 600; font-size: 14.5px; }
+  .company { color: var(--muted); font-size: 13px; margin-top: 1px; }
+  .score { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 15px;
+           min-width: 40px; text-align:right; }
+  .score.strong, .score.good { color: var(--good); }
+  .score.possible, .score.ok { color: var(--ok); }
+  .score.weak, .score.poor { color: var(--weak); }
+  .badge { display:inline-block; font-size: 10.5px; font-weight: 700; letter-spacing: .03em;
+           background: var(--chip); color: var(--accent); border-radius: 5px;
+           padding: 2px 6px; margin-left: 6px; vertical-align: 1px; }
+  .meta2 { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  .why { margin-top: 8px; font-size: 13px; }
+  .gaps { margin-top: 6px; font-size: 12.5px; color: var(--weak); }
+  .gaps ul { margin: 3px 0 0; padding-left: 18px; }
+  .err { color: var(--muted); font-style: italic; font-size: 12.5px; margin-top: 6px; }
+  a.apply { display:inline-block; margin-top: 9px; font-size: 12.5px; color: var(--accent);
+            text-decoration: none; }
+  a.apply:hover { text-decoration: underline; }
+  #empty { color: var(--muted); padding: 40px 0; text-align:center; }
+</style>
+</head>
+<body>
+<header>
+  <h1>jobradar</h1>
+  <span id="meta">loading…</span>
+</header>
+<div id="controls">
+  <input id="search" type="text" placeholder="Filter by title or company…">
+  <select id="minScore">
+    <option value="0">Any score</option>
+    <option value="50">50+</option>
+    <option value="65">65+</option>
+    <option value="80">80+</option>
+  </select>
+  <select id="targetOnly">
+    <option value="0">All companies</option>
+    <option value="1">Target companies only</option>
+  </select>
+</div>
+<main><div id="list"></div><div id="empty" style="display:none">No results match these filters.</div></main>
+<script>
+async function load() {
+  let data;
+  try {
+    const res = await fetch('../data/results.json', { cache: 'no-store' });
+    data = await res.json();
+  } catch (e) {
+    document.getElementById('meta').textContent = 'Could not load data/results.json — run `python3 jobradar.py scan` first.';
+    return;
+  }
+  render(data);
+}
+
+function verdictClass(j) {
+  if (j.ai_verdict) return j.ai_verdict;
+  if (j.rank_score >= 80) return 'strong';
+  if (j.rank_score >= 55) return 'possible';
+  return 'weak';
+}
+
+function render(data) {
+  const jobs = data.jobs || [];
+  document.getElementById('meta').textContent =
+    `${jobs.length} roles · ${data.profile_headline || ''} · scored with ${data.ai_backend || 'n/a'} · generated ${data.generated_at || ''}`;
+
+  const search = document.getElementById('search');
+  const minScore = document.getElementById('minScore');
+  const targetOnly = document.getElementById('targetOnly');
+  const list = document.getElementById('list');
+  const empty = document.getElementById('empty');
+
+  function draw() {
+    const q = search.value.trim().toLowerCase();
+    const min = parseInt(minScore.value, 10);
+    const onlyTarget = targetOnly.value === '1';
+    const shown = jobs.filter(j => {
+      if (onlyTarget && !j.is_target) return false;
+      if ((j.ai_score ?? j.rank_score ?? 0) < min) return false;
+      if (q && !(`${j.title} ${j.company}`.toLowerCase().includes(q))) return false;
+      return true;
+    });
+    list.innerHTML = '';
+    empty.style.display = shown.length ? 'none' : 'block';
+    for (const j of shown) {
+      const el = document.createElement('div');
+      el.className = 'card';
+      const scoreVal = j.ai_score ?? j.rank_score;
+      const scoreLabel = j.ai_score != null ? scoreVal : `~${Math.round(scoreVal)}`;
+      const gaps = (j.ai_gaps || []).map(g => `<li>${esc(g)}</li>`).join('');
+      el.innerHTML = `
+        <div class="row1">
+          <div>
+            <div class="title">${esc(j.title)}${j.is_target ? '<span class="badge">TARGET</span>' : ''}</div>
+            <div class="company">${esc(j.company)}</div>
+          </div>
+          <div class="score ${verdictClass(j)}">${scoreLabel}</div>
+        </div>
+        <div class="meta2">${esc(j.location || '—')} · via ${esc(j.source || '')}${j.posted ? ' · seen ' + esc(j.posted) : ''}</div>
+        ${j.ai_why ? `<div class="why">${esc(j.ai_why)}</div>` : ''}
+        ${gaps ? `<div class="gaps">Gaps: <ul>${gaps}</ul></div>` : ''}
+        ${j.ai_error ? `<div class="err">AI scoring unavailable (${esc(j.ai_error)}) — ranked by keyword prescreen only.</div>` : ''}
+        ${j.url ? `<a class="apply" href="${esc(j.url)}" target="_blank" rel="noopener">Open posting →</a>` : ''}
+      `;
+      list.appendChild(el);
+    }
+  }
+  function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+  search.addEventListener('input', draw);
+  minScore.addEventListener('change', draw);
+  targetOnly.addEventListener('change', draw);
+  draw();
+}
+load();
+</script>
+</body>
+</html>

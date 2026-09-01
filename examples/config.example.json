@@ -1,0 +1,59 @@
+{
+  "_readme": "Copy to ../config.json (or run `python3 jobradar.py init`) and edit freely. This example is tuned for a Bengaluru-based fintech/payments Product Manager — swap location_filter, title_include, ats_companies, and target_companies for your own city, role, and companies.",
+
+  "profile_file": "profile.json",
+
+  "location_filter": ["bengaluru", "bangalore", "blr"],
+  "_location_note": "Substrings matched case-insensitively against each posting's location. Empty list [] disables location filtering entirely (not recommended — the index alone covers ~1.4M postings worldwide).",
+
+  "recency_days": 45,
+
+  "title_include": ["product manager", "product management", "principal product",
+                    "group product", "head of product", "director of product"],
+  "title_exclude": ["intern", "internship", "new grad", "graduate", "junior", "co-op"],
+
+  "sources": { "index": true, "ats": true, "jobspy": false },
+  "_sources_note": "index = the daily-refreshed multi-ATS index (recommended, always on). ats = the companies list below, queried live (catches postings within minutes, not a day). jobspy = Indeed/LinkedIn scraping via python-jobspy — off by default, read the README before enabling.",
+
+  "jobspy": {
+    "search_terms": ["senior product manager", "staff product manager"],
+    "location": "Bangalore, India"
+  },
+
+  "ai": {
+    "backend": "ollama",
+    "model": "mistral-nemo",
+    "ollama_host": "http://localhost:11434",
+    "max_jobs_to_score": 60,
+    "min_score": 50,
+    "workers": 4
+  },
+  "_ai_note": "backend: 'ollama' (free, local, needs `ollama pull <model>` first — see README for model recommendations), 'anthropic' (needs ANTHROPIC_API_KEY in your shell env, never in this file), or 'openai' (needs OPENAI_API_KEY). max_jobs_to_score caps how many postings get a real AI call, ranked by a cheap keyword prescreen first — raise it if you have API budget or patience for a local model. min_score filters the final list.",
+
+  "target_companies": ["Stripe", "Razorpay", "Airwallex", "Nium", "Persona", "Socure"],
+  "_target_note": "Case-insensitive substring match against company name. Matches are pinned to the top of the results and badged, regardless of AI score.",
+
+  "ats_companies": [
+    { "name": "Stripe",          "slug": "stripe",         "ats": "greenhouse" },
+    { "name": "Adyen",           "slug": "adyen",          "ats": "greenhouse" },
+    { "name": "Affirm",          "slug": "affirm",         "ats": "greenhouse" },
+    { "name": "Brex",            "slug": "brex",           "ats": "greenhouse" },
+    { "name": "Mercury",         "slug": "mercury",        "ats": "greenhouse" },
+    { "name": "Payoneer",        "slug": "payoneer",       "ats": "greenhouse" },
+    { "name": "Airwallex",       "slug": "airwallex",      "ats": "ashby" },
+    { "name": "Plaid",           "slug": "plaid",          "ats": "ashby" },
+    { "name": "Ramp",            "slug": "ramp",           "ats": "ashby" },
+    { "name": "Modern Treasury", "slug": "moderntreasury", "ats": "ashby" },
+    { "name": "Persona",         "slug": "persona",        "ats": "ashby" },
+    { "name": "Socure",          "slug": "socure",         "ats": "ashby" },
+    { "name": "Sardine",         "slug": "sardine",        "ats": "ashby" },
+    { "name": "Nium",            "slug": "nium",           "ats": "lever" },
+    { "name": "Zeta",            "slug": "zeta",           "ats": "lever" },
+    { "name": "Paytm",           "slug": "paytm",          "ats": "lever" },
+    { "name": "CRED",            "slug": "cred",           "ats": "lever" },
+    { "name": "HighLevel",       "slug": "gohighlevel",    "ats": "lever" },
+    { "name": "Groww",           "slug": "groww",          "ats": "greenhouse" },
+    { "name": "Freshworks",      "slug": "freshworks",     "ats": "smartrecruiters" }
+  ],
+  "_ats_companies_note": "How to find a company's slug: open its careers page, look at the network tab or page source for 'boards.greenhouse.io/<slug>', 'jobs.lever.co/<slug>', 'jobs.ashbyhq.com/<slug>', or 'careers.smartrecruiters.com/<slug>'. Or browse https://github.com/kalil0321/ats-scrapers/tree/main/ats-companies for a large pre-built slug dataset (23k+ companies across 8 ATS platforms). Run `python3 jobradar.py verify` after editing this list."
+}

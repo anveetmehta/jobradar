@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+
+# personal — created by `jobradar.py init`, never committed
+config.json
+profile.json
+
+# generated at runtime
+.cache/
+data/*.json
+!data/.gitkeep

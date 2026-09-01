@@ -1,0 +1,25 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  smoke-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+      - name: compile check
+        run: python -m py_compile jobradar.py match.py sources/*.py
+      - name: example config/profile are valid JSON
+        run: |
+          python -c "import json; json.load(open('examples/config.example.json'))"
+          python -c "import json; json.load(open('examples/profile.example.json'))"
+      - name: init works from a clean checkout
+        run: |
+          python jobradar.py init
+          test -f config.json && test -f profile.json
+      - name: verify reaches the configured ATS boards
+        run: python jobradar.py verify
+      - name: fast scan runs end-to-end without an AI backend
+        run: python jobradar.py scan --fast

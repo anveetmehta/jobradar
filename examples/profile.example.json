@@ -1,0 +1,43 @@
+{
+  "_readme": "Copy to ../profile.json (or run `python3 jobradar.py init`) and replace every field with YOUR real background. This is a fictional example — the AI matcher is only as honest as what you put here, and it is instructed not to invent anything beyond it.",
+
+  "name": "Jordan Rivera",
+  "headline": "Senior Product Manager — Payments & Identity Platforms",
+  "years_experience": 8,
+  "summary": "Product manager with 8 years building payments, onboarding, and compliance platforms in fintech. Owned a platform processing millions of transactions annually across multiple regions, built to satisfy dozens of local regulatory regimes without forking the codebase per market.",
+
+  "skills": [
+    "payments", "wallet", "billing", "fintech", "kyc", "kyb", "aml", "fraud",
+    "identity verification", "onboarding", "platform", "api", "compliance",
+    "risk", "merchant", "partner", "b2b", "saas", "growth", "analytics", "sql"
+  ],
+
+  "experience": [
+    {
+      "company": "Example Payments Co",
+      "title": "Senior Product Manager, Merchant Platform",
+      "start": "2023-06",
+      "end": "Present",
+      "highlights": [
+        "Own onboarding and payout platform for SMB merchants across three markets",
+        "Shipped local payment methods that raised collection success rate",
+        "Partner with Compliance, Risk, and Engineering on regulatory workflow design"
+      ]
+    },
+    {
+      "company": "Example RegTech Inc",
+      "title": "Product Manager, Identity Verification",
+      "start": "2020-02",
+      "end": "2023-05",
+      "highlights": [
+        "Owned KYC/KYB/AML platform processing millions of verifications annually",
+        "Cut onboarding time by roughly 60% through workflow automation",
+        "Built modular APIs supporting country-specific compliance without duplicated engineering"
+      ]
+    }
+  ],
+
+  "education": ["MBA, Business Analytics — Example University", "B.Tech, Computer Science"],
+
+  "notes_for_ai": "Open to Staff or Director-level individual-contributor or people-management roles. Not interested in pure growth-marketing PM roles. A stated minimum years-of-experience requirement more than 2 years above mine should be flagged as a real gap, not smoothed over."
+}
