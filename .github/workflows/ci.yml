@@ -89,7 +89,7 @@ jobs:
         run: |
           echo '{"broken": true,,}' > /tmp/bad_config.json
           set +e
-          out=$(python jobradar.py scan --config /tmp/bad_config.json --fast 2>&1)
+          out=$(python jobradar.py --config /tmp/bad_config.json scan --fast 2>&1)
           code=$?
           echo "$out"
           set -e
