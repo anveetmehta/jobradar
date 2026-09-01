@@ -22,6 +22,7 @@ Usage:
 """
 import argparse
 import datetime
+import errno
 import json
 import os
 import re
@@ -42,17 +43,45 @@ import fit  # noqa: E402
 import notify  # noqa: E402
 
 
+class ConfigError(Exception):
+    """Raised by load_config/load_profile instead of calling sys.exit directly.
+
+    Both functions are called not just from CLI commands but from webapp.py's
+    request handlers and its background scan-worker thread. sys.exit() raises
+    SystemExit, which does NOT subclass Exception — it would silently slip past
+    every `except Exception` handler in webapp.py instead of being reported,
+    leaving a background scan stuck on "running" forever with no error shown.
+    Raising a plain Exception subclass here lets webapp.py catch it normally;
+    main() converts it to sys.exit(str(e)) for the CLI path, so CLI behavior
+    is unchanged.
+    """
+
+
+def _json_error(path, e):
+    return ConfigError(
+        f"{path} has invalid JSON at line {e.lineno}, column {e.colno}: {e.msg}\n"
+        f"If you hand-edited this file, check for a missing comma or unmatched brace "
+        f"near that line. Or delete it and re-run `python3 jobradar.py init` (or the "
+        f"setup page) to start clean.")
+
+
 def load_config(path):
     if not Path(path).exists():
-        sys.exit(f"No config at {path}. Run `python3 jobradar.py init` first.")
-    return json.loads(Path(path).read_text())
+        raise ConfigError(f"No config at {path}. Run `python3 jobradar.py init` first.")
+    try:
+        return json.loads(Path(path).read_text())
+    except json.JSONDecodeError as e:
+        raise _json_error(path, e) from e
 
 
 def load_profile(cfg, base_dir):
     pfile = base_dir / cfg.get("profile_file", "profile.json")
     if not pfile.exists():
-        sys.exit(f"No profile at {pfile}. Run `python3 jobradar.py init` first.")
-    return json.loads(pfile.read_text())
+        raise ConfigError(f"No profile at {pfile}. Run `python3 jobradar.py init` first.")
+    try:
+        return json.loads(pfile.read_text())
+    except json.JSONDecodeError as e:
+        raise _json_error(pfile, e) from e
 
 
 def profile_to_text(p):
@@ -192,9 +221,9 @@ def run_scan(cfg, base_dir, profile, fast=False, fresh=False, out_path="data/res
         return j
 
     if to_score:
-        report(f"AI-scoring {len(to_score)} candidates via "
-              f"{ai_cfg.get('backend','ollama')}/{ai_cfg.get('model','?')} "
-              f"(this is the slow part)...")
+        report(f"Scoring {len(to_score)} roles against your profile using "
+              f"{ai_cfg.get('backend','ollama')}/{ai_cfg.get('model','?')} — this can take "
+              f"a few minutes on a local model, faster on a cloud API...")
         with ThreadPoolExecutor(max_workers=ai_cfg.get("workers", 4)) as ex:
             to_score = list(ex.map(score_one, to_score))
 
@@ -463,7 +492,15 @@ def cmd_watch(args):
 def cmd_serve(args):
     os.chdir(HERE)
     import webapp  # local import: webapp imports this module back, safe once main() is running
-    with ThreadingHTTPServer(("localhost", args.port), webapp.Handler) as httpd:
+    try:
+        httpd = ThreadingHTTPServer(("localhost", args.port), webapp.Handler)
+    except OSError as e:
+        if e.errno == errno.EADDRINUSE:
+            sys.exit(f"Could not start on port {args.port} — it's already in use (maybe "
+                    f"jobradar is already running?). Try a different port:\n"
+                    f"  python3 jobradar.py serve --port {args.port + 1}")
+        sys.exit(f"Could not start the server on port {args.port}: {e}")
+    with httpd:
         url = f"http://localhost:{args.port}/web/index.html"
         print(f"Serving jobradar at {url}  (Ctrl+C to stop)")
         try:
@@ -482,14 +519,14 @@ def main():
     ap.add_argument("--config", default=str(HERE / "config.json"))
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    sub.add_parser("init")
+    sub.add_parser("init", help="create config.json + profile.json from the examples")
 
     sp = sub.add_parser("scan")
     sp.add_argument("--out", default="data/results.json")
     sp.add_argument("--fast", action="store_true", help="skip AI scoring")
     sp.add_argument("--fresh", action="store_true", help="bypass the cached index")
 
-    sub.add_parser("verify")
+    sub.add_parser("verify", help="health-check the job boards listed in ats_companies")
 
     se = sub.add_parser("serve")
     se.add_argument("--port", type=int, default=8765)
@@ -507,8 +544,11 @@ def main():
     wa.add_argument("--out-dir", default="output")
 
     args = ap.parse_args()
-    {"init": cmd_init, "scan": cmd_scan, "verify": cmd_verify, "serve": cmd_serve,
-     "tailor": cmd_tailor, "watch": cmd_watch}[args.cmd](args)
+    try:
+        {"init": cmd_init, "scan": cmd_scan, "verify": cmd_verify, "serve": cmd_serve,
+         "tailor": cmd_tailor, "watch": cmd_watch}[args.cmd](args)
+    except ConfigError as e:
+        sys.exit(str(e))
 
 
 if __name__ == "__main__":

@@ -85,6 +85,42 @@ jobs:
             || (echo "expected a JSON error field, got something else"; kill $(cat /tmp/serve.pid); exit 1)
           curl -sf -o /dev/null http://localhost:8765/api/config  # server still alive, didn't crash
           kill $(cat /tmp/serve.pid)
+      - name: invalid JSON in config.json fails with a plain-language message, not a raw traceback
+        run: |
+          echo '{"broken": true,,}' > /tmp/bad_config.json
+          set +e
+          out=$(python jobradar.py scan --config /tmp/bad_config.json --fast 2>&1)
+          code=$?
+          echo "$out"
+          set -e
+          test $code -ne 0
+          echo "$out" | grep -qi "invalid JSON at line"
+          if echo "$out" | grep -qi "Traceback"; then
+            echo "raw traceback leaked to the user"; exit 1
+          fi
+      - name: a corrupted config.json doesn't leave a background scan stuck on "running" forever
+        run: |
+          cp config.json /tmp/config_backup.json
+          echo '{"broken": true,,}' > config.json
+          python jobradar.py serve --port 8765 & echo $! > /tmp/serve.pid
+          sleep 2
+          curl -s -X POST -H 'Content-Type: application/json' -d '{"fast": true}' \
+            http://localhost:8765/api/scan > /dev/null
+          for i in $(seq 1 15); do
+            out=$(curl -s http://localhost:8765/api/scan/status)
+            echo "$out"
+            echo "$out" | grep -q '"status": "error"' && break
+            sleep 1
+          done
+          echo "$out" | grep -q '"status": "error"' \
+            || (echo "scan never reported an error — the old sys.exit-swallowed-by-thread bug is back"; \
+                kill $(cat /tmp/serve.pid); exit 1)
+          # confirm the server itself is still alive via a route that doesn't touch config.json
+          # (broken config.json also breaks GET /api/config today — that's the separate do_GET
+          # exception-handling gap Phase 2 fixes; not what this step is testing)
+          curl -sf -o /dev/null http://localhost:8765/web/index.html
+          kill $(cat /tmp/serve.pid)
+          mv /tmp/config_backup.json config.json
       - name: install.sh works from scratch (its own fresh venv, not the one above)
         run: |
           cd /tmp && rm -rf install_test && cp -r "$GITHUB_WORKSPACE" install_test && cd install_test
