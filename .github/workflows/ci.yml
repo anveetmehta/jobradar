@@ -44,6 +44,23 @@ jobs:
         run: python jobradar.py verify
       - name: fast scan runs end-to-end without an AI backend
         run: python jobradar.py scan --fast
+      - name: a browser-triggered scan (/api/scan) reaches done, not just the CLI one
+        run: |
+          python jobradar.py serve --port 8765 & echo $! > /tmp/serve.pid
+          sleep 2
+          curl -sf -X POST -H 'Content-Type: application/json' -d '{"fast": true}' \
+            http://localhost:8765/api/scan
+          for i in $(seq 1 30); do
+            out=$(curl -sf http://localhost:8765/api/scan/status)
+            echo "$out"
+            echo "$out" | grep -q '"status": "done"' && break
+            echo "$out" | grep -q '"status": "error"' \
+              && (echo "scan errored"; kill $(cat /tmp/serve.pid); exit 1)
+            sleep 2
+          done
+          echo "$out" | grep -q '"status": "done"' \
+            || (echo "scan did not finish in time"; kill $(cat /tmp/serve.pid); exit 1)
+          kill $(cat /tmp/serve.pid)
       - name: tailor fails cleanly (no controlled error, no traceback) with no AI backend up
         run: |
           set +e
@@ -68,3 +85,14 @@ jobs:
             || (echo "expected a JSON error field, got something else"; kill $(cat /tmp/serve.pid); exit 1)
           curl -sf -o /dev/null http://localhost:8765/api/config  # server still alive, didn't crash
           kill $(cat /tmp/serve.pid)
+      - name: install.sh works from scratch (its own fresh venv, not the one above)
+        run: |
+          cd /tmp && rm -rf install_test && cp -r "$GITHUB_WORKSPACE" install_test && cd install_test
+          rm -rf .venv config.json profile.json data/results.json data/seen_urls.json .cache
+          ./install.sh --port 8766 & echo $! > /tmp/install_test.pid
+          for i in $(seq 1 30); do
+            curl -sf -o /dev/null http://localhost:8766/api/config && break
+            sleep 2
+          done
+          curl -sf http://localhost:8766/api/config | grep -q '"configured": false'
+          kill $(cat /tmp/install_test.pid)

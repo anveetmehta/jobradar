@@ -38,35 +38,37 @@ explicitly not to invent qualifications you don't have, and to name real gaps
 ```bash
 git clone https://github.com/anveetmehta/jobradar.git
 cd jobradar
-python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-
-.venv/bin/python jobradar.py serve     # opens http://localhost:8765
+./install.sh
 ```
 
-The first time you open it with no `config.json`/`profile.json` present, it
-redirects to a setup page — your background, the job titles and companies
-you want, and your AI backend, all as a form. Submitting it writes
-`config.json` + `profile.json` for you; nothing here is sent anywhere until
-you run a scan or ask for a tailored resume. Both files are gitignored —
-your job search is never committed, even if you fork this repo.
+That's it — `install.sh` creates a virtual environment if you don't have one
+yet, installs dependencies, and opens `http://localhost:8765`. Run it again
+any time as your normal "start jobradar" command; it won't redo the setup
+work if nothing's changed. (No shell script? Same three steps by hand:
+`python3 -m venv .venv`, `.venv/bin/pip install -r requirements.txt`,
+`.venv/bin/python jobradar.py serve`.)
 
-Once set up, generate your first ranked list and browse it in the same page:
+With no `config.json`/`profile.json` present yet, it redirects to a setup
+page — your background, the job titles and companies you want, and your AI
+backend, all as a form. Submitting it writes both files for you; nothing
+here is sent anywhere until you run a scan or ask for a tailored resume.
+Both are gitignored — your job search is never committed, even if you fork
+this repo.
 
-```bash
-.venv/bin/python jobradar.py verify    # sanity-check your ATS company list
-.venv/bin/python jobradar.py scan      # fetch + AI-score + rank -> data/results.json
-```
+Right after setup it kicks off an instant keyword-only preview automatically
+so you're not staring at an empty page — click **Full AI scan** on the same
+screen when you want real, explained scoring (takes a few minutes the first
+time it downloads the job index; fast after that). Everything — setup,
+scanning, browsing, tailoring — happens in the browser. No terminal beyond
+the one command that started it.
 
-Reload the browser tab — each result has a **Tailor resume & cover letter**
-button that generates both in-browser, verified to one page, with a link to
-open each. `scan` and `watch` stay command-line/cron operations on purpose
-(a real AI-scored scan takes minutes — a bad fit for a page waiting on one
-HTTP response), everything else — setup, browsing, tailoring — happens in
-the UI. The CLI equivalents still work if you prefer them or want to script this:
+CLI equivalents exist for scripting or automation (a cron job, `watch`
+running unattended for days):
 
 ```bash
 .venv/bin/python jobradar.py init      # creates config.json + profile.json from the examples,
                                         # if you'd rather hand-edit JSON than use the setup page
+.venv/bin/python jobradar.py scan      # fetch + AI-score + rank -> data/results.json
 .venv/bin/python jobradar.py tailor 3  # one-page resume + cover letter for result #3
 .venv/bin/python jobradar.py watch     # radar: alert + auto-tailor on new target-company roles
 ```

@@ -1,17 +1,21 @@
 """The local web app behind `jobradar.py serve`.
 
-Static files (web/, data/, output/, docs/) plus three small JSON API routes
-so the whole loop — set up your profile, browse matches, get a tailored
-resume/cover letter — happens in the browser. `scan` and `watch` stay
-CLI/cron operations on purpose: they can take minutes with a real AI
-backend, which is a bad fit for a page waiting on one HTTP response.
+Static files (web/, data/, output/, docs/) plus a handful of JSON API routes
+so the whole loop — set up your profile, run a scan, browse matches, get a
+tailored resume/cover letter — happens in the browser, no CLI required.
 
-  GET  /api/config   -> is a profile/config already set up, and (redacted) what's in it
-  POST /api/setup    -> writes config.json + profile.json from the setup form
-  POST /api/tailor   -> runs the tailor pipeline for one job, returns file URLs
+  GET  /api/config      -> is a profile/config already set up, and (redacted) what's in it
+  POST /api/setup       -> writes config.json + profile.json from the setup form
+  POST /api/scan        -> starts a scan in the background ({"fast": bool} in the body)
+  GET  /api/scan/status -> poll while a scan runs: {status, message, count}
+  POST /api/tailor      -> runs the tailor pipeline for one job, returns file URLs
+
+`watch` stays a CLI/cron thing on purpose — it's meant to run for days
+unattended, which isn't something a browser tab should be responsible for.
 """
 import json
 import sys
+import threading
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from urllib.parse import urlparse
@@ -20,6 +24,9 @@ import jobradar as jr
 
 HERE = Path(__file__).parent
 STATIC_ROOTS = ("web", "data", "output", "docs")
+
+_scan_lock = threading.Lock()
+_scan_state = {"status": "idle", "message": "", "count": 0, "error": None}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -73,6 +80,8 @@ class Handler(BaseHTTPRequestHandler):
         route = urlparse(self.path).path
         if route == "/api/config":
             return self._get_config()
+        if route == "/api/scan/status":
+            return self._json(200, dict(_scan_state))
         self._serve_static()
 
     def do_POST(self):
@@ -80,6 +89,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if route == "/api/setup":
                 return self._post_setup()
+            if route == "/api/scan":
+                return self._post_scan()
             if route == "/api/tailor":
                 return self._post_tailor()
         except Exception as e:  # noqa: BLE001 — surface it to the UI, don't crash the server
@@ -104,6 +115,36 @@ class Handler(BaseHTTPRequestHandler):
                 "watched_companies": [c["name"] for c in cfg.get("ats_companies", [])],
             }
         self._json(200, out)
+
+    # ---- /api/scan -------------------------------------------------------
+    def _post_scan(self):
+        body = self._read_json_body()
+        fast = bool(body.get("fast", False))
+
+        with _scan_lock:
+            if _scan_state["status"] == "running":
+                return self._json(409, dict(_scan_state))
+            _scan_state.update(status="running", message="starting...", count=0, error=None)
+
+        def worker():
+            try:
+                cfg = jr.load_config(str(HERE / "config.json"))
+                profile = jr.load_profile(cfg, HERE)
+
+                def on_progress(msg):
+                    with _scan_lock:
+                        _scan_state["message"] = msg
+
+                result = jr.run_scan(cfg, HERE, profile, fast=fast, progress=on_progress)
+                with _scan_lock:
+                    _scan_state.update(status="done", message="done",
+                                       count=len(result["kept"]), error=None)
+            except Exception as e:  # noqa: BLE001 — surface it to the UI, don't crash the server
+                with _scan_lock:
+                    _scan_state.update(status="error", error=f"{type(e).__name__}: {e}")
+
+        threading.Thread(target=worker, daemon=True).start()
+        self._json(202, dict(_scan_state))
 
     # ---- /api/setup --------------------------------------------------
     def _post_setup(self):

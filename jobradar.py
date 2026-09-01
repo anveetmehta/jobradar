@@ -143,28 +143,33 @@ def cmd_verify(args):
         print(f"bad slug / unreachable: {', '.join(broken)}")
 
 
-def cmd_scan(args):
-    cfg = load_config(args.config)
-    base_dir = Path(args.config).parent
-    profile = load_profile(cfg, base_dir)
+def run_scan(cfg, base_dir, profile, fast=False, fresh=False, out_path="data/results.json",
+            progress=None):
+    """The whole fetch -> filter -> score -> rank -> write pipeline, usable from
+    the CLI (cmd_scan) or a background thread (webapp.py's /api/scan). `progress`,
+    if given, is called with a short status string at each phase — cmd_scan wires
+    it to a stderr print, webapp.py wires it to a pollable state dict."""
+    def report(msg):
+        if progress:
+            progress(msg)
+
     profile_text = profile_to_text(profile)
     src_cfg = cfg.get("sources", {})
     cache_dir = base_dir / ".cache"
 
+    report("fetching sources...")
     jobs, board_errors = [], []
     if src_cfg.get("index", True):
-        jobs += index_source.load(cache_dir, cfg.get("location_filter"), fresh=args.fresh)
+        jobs += index_source.load(cache_dir, cfg.get("location_filter"), fresh=fresh)
     if src_cfg.get("ats", True) and cfg.get("ats_companies"):
         found, board_errors = ats.fetch_all(cfg["ats_companies"])
         jobs += found
     if src_cfg.get("jobspy", False):
         jcfg = cfg.get("jobspy", {})
-        jobs += jobspy_source.load(jcfg.get("search_terms", []),
-                                   jcfg.get("location", ""))
+        jobs += jobspy_source.load(jcfg.get("search_terms", []), jcfg.get("location", ""))
 
-    print(f"[scan] {len(jobs)} raw postings from enabled sources", file=sys.stderr)
+    report(f"{len(jobs)} raw postings — filtering...")
     candidates = dedupe(prescreen_filter(jobs, cfg))
-    print(f"[scan] {len(candidates)} after title/location filter + dedupe", file=sys.stderr)
 
     skills = profile.get("skills", [])
     for j in candidates:
@@ -172,7 +177,7 @@ def cmd_scan(args):
     candidates.sort(key=lambda j: -j["_pre"])
 
     ai_cfg = cfg.get("ai", {})
-    max_score = 0 if args.fast else ai_cfg.get("max_jobs_to_score", 60)
+    max_score = 0 if fast else ai_cfg.get("max_jobs_to_score", 60)
     to_score, rest = candidates[:max_score], candidates[max_score:]
     api_key = _ai_api_key(ai_cfg)
 
@@ -187,8 +192,9 @@ def cmd_scan(args):
         return j
 
     if to_score:
-        print(f"[scan] AI-scoring {len(to_score)} candidates via "
-              f"{ai_cfg.get('backend','ollama')}/{ai_cfg.get('model','?')}...", file=sys.stderr)
+        report(f"AI-scoring {len(to_score)} candidates via "
+              f"{ai_cfg.get('backend','ollama')}/{ai_cfg.get('model','?')} "
+              f"(this is the slow part)...")
         with ThreadPoolExecutor(max_workers=ai_cfg.get("workers", 4)) as ex:
             to_score = list(ex.map(score_one, to_score))
 
@@ -209,26 +215,38 @@ def cmd_scan(args):
     kept.sort(key=lambda j: (-j["is_target"], -j["rank_score"]))
 
     errs = sum(1 for j in to_score if j.get("ai_error"))
-    if errs:
-        print(f"[scan] {errs}/{len(to_score)} AI calls failed and fell back to "
-              f"prescreen ranking — see ai_error in results.json", file=sys.stderr)
-    if board_errors:
-        print(f"[scan] ATS boards that didn't respond: {', '.join(board_errors)}",
-              file=sys.stderr)
 
-    out_path = base_dir / args.out
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps({
-        "generated_at": __import__("datetime").datetime.now().isoformat(timespec="seconds"),
+    out = base_dir / out_path
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps({
+        "generated_at": datetime.datetime.now().isoformat(timespec="seconds"),
         "profile_headline": profile.get("headline", ""),
         "ai_backend": f"{ai_cfg.get('backend','ollama')}/{ai_cfg.get('model','')}"
-                     if not args.fast else "none (--fast)",
+                     if not fast else "none (--fast)",
         "count": len(kept),
         "jobs": kept,
     }, indent=2))
-    print(f"\n[scan] wrote {len(kept)} ranked roles -> {out_path}")
+    report(f"wrote {len(kept)} ranked roles")
+    return {"kept": kept, "out_path": out, "ai_errors": errs, "board_errors": board_errors}
 
-    for j in kept[:15]:
+
+def cmd_scan(args):
+    cfg = load_config(args.config)
+    base_dir = Path(args.config).parent
+    profile = load_profile(cfg, base_dir)
+
+    result = run_scan(cfg, base_dir, profile, fast=args.fast, fresh=args.fresh,
+                      out_path=args.out, progress=lambda m: print(f"[scan] {m}", file=sys.stderr))
+
+    if result["ai_errors"]:
+        print(f"[scan] {result['ai_errors']} AI call(s) failed and fell back to prescreen "
+              f"ranking — see ai_error in results.json", file=sys.stderr)
+    if result["board_errors"]:
+        print(f"[scan] ATS boards that didn't respond: {', '.join(result['board_errors'])}",
+              file=sys.stderr)
+    print(f"\n[scan] wrote {len(result['kept'])} ranked roles -> {result['out_path']}")
+
+    for j in result["kept"][:15]:
         badge = " [TARGET]" if j["is_target"] else ""
         score = f"{j['ai_score']}" if j["ai_score"] is not None else f"~{j['rank_score']:.0f}*"
         print(f"  {score:>4}  {j['title'][:55]:<55} {j['company']:<20}{badge}")

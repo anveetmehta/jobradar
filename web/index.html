@@ -108,10 +108,11 @@ async function boot() {
     return;
   }
   document.getElementById('meta').textContent = cfg.summary.headline || '';
-  load();
+  const justSetUp = new URLSearchParams(window.location.search).get('justSetUp') === '1';
+  load(justSetUp);
 }
 
-async function load() {
+async function load(auto) {
   let data;
   try {
     const res = await fetch('../data/results.json', { cache: 'no-store' });
@@ -122,12 +123,51 @@ async function load() {
     document.getElementById('controls').style.display = 'none';
     document.getElementById('list').innerHTML = `<div id="scan-needed">
       You're set up, but there's nothing to show yet.<br><br>
-      Run <code>python3 jobradar.py scan</code> in a terminal, then reload this page.
-      A first run downloads a large index and can take a few minutes — after that it's fast.
+      <button class="tailor" id="scan-fast">Quick preview (instant, keyword-only)</button>
+      &nbsp; <button class="tailor" id="scan-full">Full AI scan (a few minutes)</button>
+      <div id="scan-status" style="margin-top:14px;color:var(--muted)"></div>
     </div>`;
+    document.getElementById('scan-fast').onclick = () => runScan(true);
+    document.getElementById('scan-full').onclick = () => runScan(false);
+    if (auto) runScan(true);
     return;
   }
   render(data);
+}
+
+async function runScan(fast) {
+  const status = document.getElementById('scan-status');
+  document.getElementById('scan-fast').disabled = true;
+  document.getElementById('scan-full').disabled = true;
+  try {
+    const res = await fetch('/api/scan', { method: 'POST', headers: {'Content-Type':'application/json'},
+                                           body: JSON.stringify({ fast }) });
+    if (res.status === 409) { status.textContent = 'A scan is already running...'; }
+  } catch (e) {
+    status.textContent = 'Could not reach the server: ' + e.message;
+    return;
+  }
+  poll();
+}
+
+async function poll() {
+  const status = document.getElementById('scan-status');
+  try {
+    const s = await (await fetch('/api/scan/status')).json();
+    if (s.status === 'running') {
+      status.textContent = s.message || 'working...';
+      setTimeout(poll, 1500);
+    } else if (s.status === 'error') {
+      status.textContent = 'Scan failed: ' + s.error;
+      document.getElementById('scan-fast').disabled = false;
+      document.getElementById('scan-full').disabled = false;
+    } else if (s.status === 'done') {
+      status.textContent = `Done — ${s.count} roles. Loading...`;
+      setTimeout(() => load(false), 400);
+    }
+  } catch (e) {
+    status.textContent = 'Lost contact with the server — is it still running?';
+  }
 }
 
 function verdictClass(j) {
