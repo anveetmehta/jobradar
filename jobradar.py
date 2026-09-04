@@ -299,6 +299,17 @@ def _slug(s):
     return re.sub(r"-{2,}", "-", re.sub(r"[^a-z0-9]+", "-", s.lower())).strip("-") or "role"
 
 
+def _resolve_output_dir(cfg, base_dir, override=None):
+    """Where tailored resumes/cover letters get written. Precedence: an
+    explicit override (CLI --out-dir) > config.json's paths.output_dir >
+    "output". Supports "~" and absolute paths so files can land directly
+    outside the app's own directory (e.g. ~/Documents/Resume); a relative
+    value stays relative to base_dir, same as always."""
+    raw = override or cfg.get("paths", {}).get("output_dir") or "output"
+    expanded = Path(raw).expanduser()
+    return expanded if expanded.is_absolute() else base_dir / expanded
+
+
 def _resolve_job(ref, base_dir, results_path):
     """ref is either an http(s) URL, or a 1-based index into the last scan's
     ranked results.json."""
@@ -324,7 +335,7 @@ def _ai_api_key(ai_cfg):
     return None
 
 
-def tailor_job(job_rec, profile, profile_text, cfg, base_dir, out_dir_name="output",
+def tailor_job(job_rec, profile, profile_text, cfg, base_dir, out_dir_name=None,
                progress=None):
     """Shared by `tailor` and `watch --auto-tailor`. Returns a report dict;
     never raises — a failure is reported, not a crash, since `watch` must
@@ -356,9 +367,9 @@ def tailor_job(job_rec, profile, profile_text, cfg, base_dir, out_dir_name="outp
                     + [letter_content.get("closing", ""), letter_content.get("acknowledge_gap", "")]),
             profile)
 
-    out_dir = base_dir / out_dir_name
+    out_base = _resolve_output_dir(cfg, base_dir, out_dir_name)
+    out_dir = out_base / _slug(job_rec.get("company", "company")) / _slug(job_rec.get("title", "role"))
     out_dir.mkdir(parents=True, exist_ok=True)
-    stub = f"{_slug(job_rec.get('company', 'company'))}_{_slug(job_rec.get('title', 'role'))}"
 
     start_density = cfg.get("render", {}).get("preferred_density", "normal")
 
@@ -372,7 +383,7 @@ def tailor_job(job_rec, profile, profile_text, cfg, base_dir, out_dir_name="outp
                             "cover: " + ", ".join(unmet))
 
     report_phase("Checking the resume fits one page...")
-    resume_report = fit.fit_resume(profile, resume_content, out_dir / f"{stub}_resume.html",
+    resume_report = fit.fit_resume(profile, resume_content, out_dir / "resume.html",
                                    title=f"{profile.get('name','')} — resume",
                                    start_density=start_density, extra_notes=resume_notes)
     letter_report = None
@@ -381,7 +392,7 @@ def tailor_job(job_rec, profile, profile_text, cfg, base_dir, out_dir_name="outp
         report_phase("Checking the cover letter fits one page...")
         today = datetime.date.today().strftime("%d %B %Y")
         letter_report = fit.fit_cover_letter(profile, letter_content, job_rec,
-                                             out_dir / f"{stub}_cover_letter.html",
+                                             out_dir / "cover_letter.html",
                                              date_str=today, start_density=start_density,
                                              extra_notes=letter_notes)
 
@@ -389,7 +400,7 @@ def tailor_job(job_rec, profile, profile_text, cfg, base_dir, out_dir_name="outp
              "letter_report": letter_report, "removed_skills": removed_skills,
              "claim_flags": claim_flags, "unmet_requirements": unmet}
 
-    report_path = out_dir / f"{stub}_resume_report.json"
+    report_path = out_dir / "resume_report.json"
     sidecar = dict(report)
     for key in ("resume_report", "letter_report"):
         if sidecar.get(key):
@@ -583,14 +594,16 @@ def main():
     ta = sub.add_parser("tailor", help="generate a tailored one-page resume + cover letter")
     ta.add_argument("ref", help="a result number from the last `scan` (e.g. 3), or a full "
                                 "job posting URL")
-    ta.add_argument("--out-dir", default="output")
+    ta.add_argument("--out-dir", default=None,
+                    help="override config.json's paths.output_dir for this run")
     ta.add_argument("--results", default="data/results.json")
 
     wa = sub.add_parser("watch", help="poll target_companies and alert + auto-tailor on new roles")
     wa.add_argument("--once", action="store_true", help="one poll pass, then exit (for cron/launchd)")
     wa.add_argument("--interval", type=int, default=None,
                     help="minutes between polls (default: config.json watch.poll_interval_minutes)")
-    wa.add_argument("--out-dir", default="output")
+    wa.add_argument("--out-dir", default=None,
+                    help="override config.json's paths.output_dir for this run")
 
     args = ap.parse_args()
     try:

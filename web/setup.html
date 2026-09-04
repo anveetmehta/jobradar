@@ -199,6 +199,13 @@
       <div id="test-detail"></div>
     </section>
 
+    <section id="output-section">
+      <h2>Where to save tailored files <span class="opt">optional</span></h2>
+      <p class="hint">Resumes, cover letters, and their reports are organized in subfolders per company and role. Leave this as <code>output</code> to keep them next to jobradar, or enter a path to save them somewhere else — e.g. <code>~/Documents/Resume/jobradar</code>.</p>
+      <label for="in-output_dir">Save folder</label>
+      <input type="text" id="in-output_dir" placeholder="output">
+    </section>
+
     <button type="submit" class="btn-primary" id="submit" disabled>Test your connection above first</button>
     <button type="button" class="save-anyway" id="save-anyway">Save anyway, I'll fix this later</button>
     <div class="status" id="status"></div>
@@ -487,6 +494,7 @@ async function boot() {
   document.getElementById('in-titles').value = (c.title_include || []).join(', ');
   document.getElementById('in-locs').value = (c.location_filter || []).join(', ');
   document.getElementById('in-targets').value = (c.target_companies || []).join(', ');
+  document.getElementById('in-output_dir').value = (c.paths || {}).output_dir || '';
 
   if ((c.ai || {}).ollama_host) existingOllamaHost = c.ai.ollama_host;
 
@@ -570,6 +578,7 @@ document.getElementById('f').addEventListener('submit', async (e) => {
     target_companies: splitCommas('in-targets'),
     ai_backend: selectedBackend(),
     ai_model: selectedModel(),
+    output_dir: document.getElementById('in-output_dir').value.trim(),
   };
 
   try {

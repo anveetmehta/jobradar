@@ -20,6 +20,9 @@ tailored resume/cover letter — happens in the browser, no CLI required.
   GET  /api/pull-model/status -> poll while a pull runs
   GET  /api/verify          -> health-checks every board in ats_companies,
                                the web equivalent of `jobradar.py verify`
+  GET  /files/<path>        -> serves a generated resume/cover-letter/report
+                               file from config.json's paths.output_dir,
+                               which may live outside HERE entirely
 
 `watch` stays a CLI/cron thing on purpose — it's meant to run for days
 unattended, which isn't something a browser tab should be responsible for.
@@ -30,7 +33,7 @@ import sys
 import threading
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 import requests
 
@@ -90,6 +93,19 @@ class Handler(BaseHTTPRequestHandler):
             return {}
         return json.loads(self.rfile.read(length).decode())
 
+    def _send_file(self, fs_path):
+        ctype = {
+            ".html": "text/html", ".js": "application/javascript",
+            ".json": "application/json", ".css": "text/css",
+            ".png": "image/png", ".pdf": "application/pdf",
+        }.get(fs_path.suffix, "application/octet-stream")
+        data = fs_path.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
     def _serve_static(self):
         path = urlparse(self.path).path.lstrip("/")
         if not path or path == "index.html":
@@ -105,17 +121,26 @@ class Handler(BaseHTTPRequestHandler):
         if not fs_path.is_file():
             self.send_error(404)
             return
-        ctype = {
-            ".html": "text/html", ".js": "application/javascript",
-            ".json": "application/json", ".css": "text/css",
-            ".png": "image/png", ".pdf": "application/pdf",
-        }.get(fs_path.suffix, "application/octet-stream")
-        data = fs_path.read_bytes()
-        self.send_response(200)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(data)))
-        self.end_headers()
-        self.wfile.write(data)
+        self._send_file(fs_path)
+
+    def _serve_output_file(self, rel_path):
+        """Serves a generated resume/cover-letter/report file from
+        config.json's paths.output_dir — which may live entirely outside
+        HERE (an absolute path like ~/Documents/Resume), so this can't reuse
+        _serve_static's HERE-rooted containment check. Resolves both sides
+        and confirms the requested file is actually under that directory
+        before serving, to block ../ traversal outside it."""
+        try:
+            cfg = jr.load_config(str(HERE / "config.json"))
+        except jr.ConfigError:
+            return self.send_error(404)
+        base = jr._resolve_output_dir(cfg, HERE).resolve()
+        fs_path = (base / rel_path).resolve()
+        if base not in fs_path.parents:
+            return self.send_error(403)
+        if not fs_path.is_file():
+            return self.send_error(404)
+        self._send_file(fs_path)
 
     # ---- routes --------------------------------------------------------
     def do_GET(self):
@@ -131,6 +156,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(200, dict(_tailor_state))
             if route == "/api/verify":
                 return self._get_verify()
+            if route.startswith("/files/"):
+                return self._serve_output_file(unquote(route[len("/files/"):]))
         except Exception as e:  # noqa: BLE001 — surface it to the UI, don't crash the server
             import traceback
             traceback.print_exc(file=sys.stderr)
@@ -249,6 +276,7 @@ class Handler(BaseHTTPRequestHandler):
         # A previous setup may already have hand-resolved some of these via
         # /api/resolve-companies — carry those forward instead of losing them
         # if the user re-submits the setup form (e.g. editing an unrelated field).
+        prior_output_dir = None
         if (HERE / "config.json").exists():
             try:
                 prior = json.loads((HERE / "config.json").read_text())
@@ -258,6 +286,7 @@ class Handler(BaseHTTPRequestHandler):
                     hit = prior_by_name.get(u["name"].lower())
                     (matched if hit else still_unmatched).append(hit or u)
                 unmatched = still_unmatched
+                prior_output_dir = prior.get("paths", {}).get("output_dir")
             except (json.JSONDecodeError, OSError):
                 pass  # a broken existing config.json shouldn't block writing a fresh one
 
@@ -269,6 +298,8 @@ class Handler(BaseHTTPRequestHandler):
         cfg["ats_companies"] = matched
         cfg["ai"]["backend"] = body.get("ai_backend", cfg["ai"]["backend"])
         cfg["ai"]["model"] = body.get("ai_model", cfg["ai"]["model"])
+        cfg.setdefault("paths", {})["output_dir"] = (
+            body.get("output_dir", "").strip() or prior_output_dir or cfg["paths"]["output_dir"])
         (HERE / "config.json").write_text(json.dumps(cfg, indent=2))
 
         profile = {
@@ -353,8 +384,13 @@ class Handler(BaseHTTPRequestHandler):
                         _tailor_state.update(status="error", error=report["error"])
                     return
 
+                out_base = jr._resolve_output_dir(cfg, HERE).resolve()
+
                 def rel(p):
-                    return "/" + str(Path(p).relative_to(HERE)) if p else None
+                    # Not necessarily under HERE — paths.output_dir may point
+                    # anywhere (e.g. ~/Documents/Resume) — so this is served
+                    # via /files/, not the HERE-rooted static routes.
+                    return "/files/" + str(Path(p).resolve().relative_to(out_base)) if p else None
 
                 result = {
                     "ok": True,

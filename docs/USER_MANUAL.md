@@ -148,6 +148,12 @@ everything you've configured so far is actually reachable (see
 command for this install, plus links to platform scheduler docs
 (launchd/cron/Task Scheduler) — see [The radar](#the-radar-watch).
 
+**7. Where to save tailored files (optional).** Defaults to an `output`
+folder next to jobradar. Enter an absolute path (or one starting with `~`,
+e.g. `~/Documents/Resume/jobradar`) to have every tailored resume and cover
+letter land there directly instead, organized into a subfolder per company
+and role — see [Tailoring a resume and cover letter](#tailoring-a-resume-and-cover-letter).
+
 Saving writes `config.json` and `profile.json` and takes you to the main
 board, which kicks off an instant keyword-only preview scan automatically so
 you're never staring at an empty page.
@@ -215,16 +221,26 @@ The CLI equivalent:
 ```bash
 jobradar.py tailor 3                  # tailor for result #3 from your last `scan`
 jobradar.py tailor https://...        # or tailor directly against any posting URL
+jobradar.py tailor 3 --out-dir DIR    # override paths.output_dir for this run only
 ```
 
 The AI reads your `profile.json` and the real job description, then
 selects, reorders, and lightly tightens your **existing** bullets and
 skills — it does not invent new ones. Output goes to
-`output/<company>_<role>_resume.html` / `..._cover_letter.html`, plus a
-sidecar `output/<company>_<role>_resume_report.json` with the full
-structured report (removed skills, flagged claims, unmet requirements,
-density used) — a durable record independent of the transient UI, useful if
-you're reviewing files later, e.g. right before an interview.
+`<output_dir>/<company>/<role>/resume.html` and `cover_letter.html`,
+organized into a subfolder per company and role, plus a sidecar
+`resume_report.json` in that same folder with the full structured report
+(removed skills, flagged claims, unmet requirements, density used) — a
+durable record independent of the transient UI, useful if you're reviewing
+files later, e.g. right before an interview.
+
+`<output_dir>` defaults to `output`, next to jobradar itself, and is
+configurable via `config.json`'s `paths.output_dir` or the setup page's
+"Where to save tailored files" field — set it to an absolute path (or one
+starting with `~`) to save directly into, say, `~/Documents/Resume/jobradar`
+instead. In the web UI, generated files are served from wherever this
+points at via `/files/<company>/<role>/...`, so moving it outside the app's
+own folder doesn't break the download links.
 
 **One page, verified, not asserted.** Each file is rendered with a headless
 browser and its actual page count measured. If it doesn't fit, jobradar
@@ -251,8 +267,9 @@ not a guarantee: treat the output as a strong first draft, not ground truth
 ready to submit unread.
 
 Download links in the web UI are pre-filled with a friendly suggested
-filename (`Your Name - Company - Title.html`) rather than the internal
-`company_role_resume.html` slug used on disk.
+filename (`Your Name - Company - Title.html`) rather than the plain
+`resume.html`/`cover_letter.html` names used on disk (the company/role are
+already encoded in the folder path there instead).
 
 ## Your profile.json
 
@@ -319,7 +336,13 @@ annotated shape:
     // ats: "greenhouse" | "lever" | "ashby" | "smartrecruiters"
   ],
 
-  "render": { "preferred_density": "normal" }   // or "compact" — skip the normal-density attempt if your resume always runs long
+  "render": { "preferred_density": "normal" },  // or "compact" — skip the normal-density attempt if your resume always runs long
+
+  "paths": { "output_dir": "output" }
+  // relative (default) stays next to jobradar; an absolute path, or one
+  // starting with "~", saves tailored files directly there instead —
+  // organized into a subfolder per company and role either way. Overridable
+  // per-run with `tailor --out-dir`/`watch --out-dir` on the CLI.
 }
 ```
 
@@ -341,14 +364,17 @@ starts at compact density:
     { "name": "Stripe",   "slug": "stripe",   "ats": "greenhouse" },
     { "name": "Nium",     "slug": "nium",     "ats": "lever" }
   ],
-  "render": { "preferred_density": "compact" }
+  "render": { "preferred_density": "compact" },
+  "paths": { "output_dir": "~/Documents/Resume/jobradar" }
 }
 ```
 
 The fields that matter most day to day: `location_filter` + `title_include`
 decide what you even see; `ai.min_score` decides the hidden-below-cutoff
 line; `target_companies` + `ats_companies` together are what makes `watch`
-actually alert on a company (the first without the second does nothing).
+actually alert on a company (the first without the second does nothing);
+`paths.output_dir` decides where tailored files land, if "next to the app"
+isn't where you actually keep your resumes.
 
 ## The radar: `watch`
 
@@ -411,7 +437,8 @@ jobradar.py scan [--fast] [--fresh] [--out PATH]
                                    # --fresh: bypass the cached daily index
 jobradar.py verify                # health-check every board in ats_companies
 jobradar.py tailor <ref>          # one-page resume + cover letter for a result number or URL
-                                   # [--out-dir DIR] [--results PATH]
+                                   # [--out-dir DIR] overrides paths.output_dir for this run
+                                   # [--results PATH]
 jobradar.py watch [--once] [--interval MIN] [--out-dir DIR]
                                    # radar: alert + auto-tailor on new target_companies roles
 jobradar.py serve [--port N]      # the local web app (default port 8765)
@@ -438,6 +465,7 @@ want to script against a running `serve` instance yourself.
 | `/api/pull-model` | POST | starts `ollama pull <model>` in the background (`{"model": "..."}`) |
 | `/api/pull-model/status` | GET | poll while a pull runs |
 | `/api/verify` | GET | health-checks every board in `ats_companies` — `{boards: [{name, ats, status, count}]}` |
+| `/files/<path>` | GET | serves a generated resume/cover-letter/report file from `paths.output_dir` — works even when that's outside the app's own folder |
 
 All background operations (`/api/scan`, `/api/tailor`, `/api/pull-model`)
 follow the same shape: the `POST` returns `202` immediately with the current

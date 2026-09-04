@@ -142,8 +142,11 @@ jobradar.py tailor https://...        # or tailor directly against any posting U
 For the chosen posting, the AI reads your `profile.json` and the real job
 description, then selects, reorders, and lightly tightens your **existing**
 bullets and skills for relevance — it does not invent new ones. Output goes
-to `output/<company>_<role>_resume.html` and `..._cover_letter.html`
-(gitignored, personal to your run).
+to `output/<company>/<role>/resume.html` and `cover_letter.html` — organized
+into a subfolder per company and role — plus a `resume_report.json` sidecar
+(gitignored, personal to your run). Configure where `output` itself lives
+via `config.json`'s `paths.output_dir` (or the setup page) — an absolute
+path, e.g. `~/Documents/Resume/jobradar`, saves files directly there instead.
 
 **One page, verified, not asserted.** Each file is rendered with a headless
 browser (Chrome, Chromium, or Edge — whichever is already on your machine)
@@ -230,6 +233,7 @@ jobradar.py verify              health-check every board in ats_companies
 jobradar.py serve [--port N]    serve the web UI (default http://localhost:8765)
 jobradar.py tailor <ref>        one-page resume + cover letter; ref is a result
                                  number from the last scan, or a posting URL
+jobradar.py tailor <ref> --out-dir DIR   override paths.output_dir for this run
 jobradar.py watch [--once]      radar: alert + auto-tailor on new target_companies roles
 ```
 
@@ -261,17 +265,20 @@ compact density since their profile always runs long:
     { "name": "Stripe",   "slug": "stripe",   "ats": "greenhouse" },
     { "name": "Nium",     "slug": "nium",     "ats": "lever" }
   ],
-  "render": { "preferred_density": "compact" }
+  "render": { "preferred_density": "compact" },
+  "paths": { "output_dir": "~/Documents/Resume/jobradar" }
 }
 ```
 
-The five fields that matter most day to day: `location_filter` and
+The fields that matter most day to day: `location_filter` and
 `title_include` decide what you even see; `ai.min_score` decides the cutoff
 below which a role is hidden (not deleted — see "hidden below your cutoff"
 in the web UI); `target_companies` + `ats_companies` together are what makes
 `watch` actually alert on a specific company (the first without the second
-does nothing); `render.preferred_density` (new in this pass) skips the
-normal-density attempt entirely when you already know your resume runs long.
+does nothing); `render.preferred_density` skips the normal-density attempt
+entirely when you already know your resume runs long; `paths.output_dir`
+decides where tailored files land — relative stays next to jobradar,
+absolute (or `~`-prefixed) saves them wherever you actually keep resumes.
 
 ## What this deliberately does not do
 

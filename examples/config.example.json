@@ -3,6 +3,9 @@
 
   "profile_file": "profile.json",
 
+  "paths": { "output_dir": "output" },
+  "_paths_note": "output_dir: where `tailor` writes each generated resume/cover letter, organized into a subfolder per company and role. Relative (default 'output') stays next to jobradar; an absolute path, or one starting with '~', saves directly there instead — e.g. '~/Documents/Resume/jobradar'. Overridable per-run on the CLI with `tailor --out-dir`/`watch --out-dir`.",
+
   "location_filter": ["bengaluru", "bangalore", "blr"],
   "_location_note": "Substrings matched case-insensitively against each posting's location. Empty list [] disables location filtering entirely (not recommended — the index alone covers ~1.4M postings worldwide).",
 
