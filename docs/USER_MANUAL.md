@@ -72,14 +72,28 @@ to the setup page. Nothing you enter is sent anywhere until you actually run
 a scan or tailor a document — both files are gitignored, so your job search
 is never committed even if you fork the repo.
 
-**1. Your profile.** Name, contact details (used only to render the
-resume/cover-letter header — never sent to an AI backend), headline, years
-of experience, skills, work history with concrete highlights, education,
-certifications, and a free-text notes field the AI weighs directly (state
-dealbreakers, seniority preference, "flag it if the role wants N+ years more
-than I have," etc.). If you leave an experience entry with highlights but no
-company/title filled in, submission is blocked with an inline error rather
-than silently dropping that entry.
+**1. Your profile.** At the top of the page, you can optionally **upload an
+existing resume** (`.pdf`, `.docx`, or `.txt`, 8MB max) — jobradar extracts
+its text and asks your currently-selected AI backend (pick one further down
+first if you're not using the default, Ollama) to structure it into the
+fields below. This is extraction, not generation: the model is instructed to
+leave a field blank rather than guess, and nothing is ever written to disk
+from this step — you're asked to confirm before it overwrites anything
+you've already typed, and every field stays editable afterward. **Always
+review what got extracted before saving** — a misread PDF or an unusual
+resume layout can produce a wrong or incomplete field, same caution as
+tailored output elsewhere in this tool. If parsing fails (backend
+unreachable, unsupported file, no text layer), you get a plain-language
+reason and can just fill the form in by hand instead.
+
+Below that: name, contact details (used only to render the resume/cover-letter
+header — never sent to an AI backend), headline, years of experience, skills,
+work history with concrete highlights, education, certifications, and a
+free-text notes field the AI weighs directly (state dealbreakers, seniority
+preference, "flag it if the role wants N+ years more than I have," etc.). If
+you leave an experience entry with highlights but no company/title filled
+in, submission is blocked with an inline error rather than silently dropping
+that entry.
 
 **2. What you're looking for.** Location filter, job-title include/exclude
 terms, and a list of target companies. Target companies are matched
@@ -456,6 +470,7 @@ want to script against a running `serve` instance yourself.
 |---|---|---|
 | `/api/config` | GET | is a profile/config set up; full config/profile when configured |
 | `/api/setup` | POST | writes config.json + profile.json from the setup form |
+| `/api/parse-resume` | POST | extracts an uploaded resume (`.pdf`/`.docx`/`.txt`) and structures it via the AI backend, for the setup form to pre-fill from |
 | `/api/resolve-companies` | POST | merges hand-resolved `{name, slug, ats}` entries into `ats_companies` |
 | `/api/scan` | POST | starts a scan in the background (`{"fast": bool}`) |
 | `/api/scan/status` | GET | poll while a scan runs: `{status, message, count, error}` |
@@ -514,6 +529,13 @@ for you.
 Install Chrome, Chromium, or Edge — jobradar looks for whichever is already
 on your machine to verify page counts and will say explicitly if none is
 found rather than silently shipping an unverified file.
+
+**Resume upload says it can't be parsed.**
+Same causes and fixes as any other AI call: for Ollama, is `ollama serve`
+running and the model pulled; for Anthropic/OpenAI, is the API key set in
+the terminal `serve` is running in. A "no text could be extracted" message
+usually means the PDF is a scanned image with no real text layer — try a
+text-based export, or just fill the form in by hand.
 
 ## What jobradar deliberately does not do
 

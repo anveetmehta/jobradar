@@ -137,6 +137,77 @@ Respond with ONLY a JSON object, no other text, no markdown fences:
 {"opening": "<1-2 sentences>", "body": ["<paragraph>", "<paragraph>"],
  "closing": "<1 sentence>", "acknowledge_gap": "<sentence, or empty string>"}"""
 
+PARSE_RESUME_SYSTEM = """You are extracting structured data from a candidate's own resume \
+text, to pre-fill a setup form the candidate will review and correct before saving. This is \
+extraction, not generation — a fabricated field here is a serious error, not a stylistic one.
+
+Hard rules:
+- Extract ONLY what is explicitly stated in the resume text below. Never invent, infer, \
+estimate, or embellish a name, date, employer, title, achievement, or skill that isn't there.
+- If a field isn't present in the text, use an empty string "" or empty list [] for it — never \
+guess a plausible-sounding value to fill a gap.
+- "years_experience" is your best count of total professional years from the STATED dates only \
+(earliest start date to latest end date/"present"). If dates are missing or unclear, use 0 \
+rather than guessing.
+- "skills" lists only skills/technologies explicitly named in the text, not ones you infer \
+from job titles or descriptions.
+- Keep every "experience" entry's company, title, and dates EXACTLY as written in the source — \
+do not standardize, correct, or rephrase them.
+- "highlights" per role: the actual bullet points/achievements as stated, lightly cleaned of \
+bullet characters and line-wrap artifacts, but never rewritten or summarized.
+- List experience entries in the order they appear in the source text.
+
+Respond with ONLY a JSON object, no other text, no markdown fences:
+{"name": "", "contact": {"location": "", "email": "", "phone": "", "linkedin": ""},
+ "headline": "", "years_experience": 0, "summary": "", "skills": [],
+ "experience": [{"company": "", "title": "", "start": "", "end": "", "highlights": []}],
+ "education": [], "certifications": []}"""
+
+
+def extract_resume_text(filename, raw_bytes):
+    """Best-effort text extraction from an uploaded resume file (.pdf/.docx/.txt).
+    -> (text, error) — error is a plain-language string on failure, else None.
+    Never raises; the caller (webapp.py) has no other way to degrade a bad
+    upload gracefully."""
+    import io
+    from pathlib import Path
+    ext = Path(filename).suffix.lower()
+    try:
+        if ext == ".pdf":
+            from pypdf import PdfReader
+            reader = PdfReader(io.BytesIO(raw_bytes))
+            text = "\n".join(page.extract_text() or "" for page in reader.pages)
+        elif ext == ".docx":
+            import docx
+            text = "\n".join(p.text for p in docx.Document(io.BytesIO(raw_bytes)).paragraphs)
+        elif ext == ".txt":
+            text = raw_bytes.decode("utf-8", errors="ignore")
+        else:
+            return None, f"Unsupported file type {ext or '(none)'} — upload a .pdf, .docx, or .txt file."
+    except Exception as e:  # noqa: BLE001 — any parsing library failure degrades the same way
+        return None, f"Could not read this file: {e}"
+    text = text.strip()
+    if not text:
+        return None, ("No text could be extracted from this file — it might be a scanned image "
+                      "with no text layer. Try a text-based export, or fill the form in by hand.")
+    return text, None
+
+
+def parse_resume_text(raw_text, ai_config, api_key=None):
+    """-> dict per the profile.json schema, or {"error": "..."} on failure.
+    Extraction only, per PARSE_RESUME_SYSTEM — the web UI pre-fills the setup
+    form from this for the user to review and correct. It never writes
+    profile.json directly from it; a human always confirms first."""
+    text = raw_text[:20000]  # bound what gets sent, rather than truncate silently mid-word later
+    try:
+        raw = call_llm(PARSE_RESUME_SYSTEM, text, ai_config, api_key)
+    except (RuntimeError, requests.exceptions.RequestException) as e:
+        return {"error": str(e)}
+    parsed = extract_json(raw)
+    if not parsed or "experience" not in parsed:
+        return {"error": "model did not return parseable resume JSON", "raw": raw[:300]}
+    return parsed
+
 
 def _profile_block(profile_text):
     return f"CANDIDATE PROFILE:\n{profile_text.strip()}"

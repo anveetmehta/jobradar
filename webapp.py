@@ -8,6 +8,10 @@ tailored resume/cover letter — happens in the browser, no CLI required.
                                (when configured) the full config/profile for
                                the setup form to pre-fill from
   POST /api/setup           -> writes config.json + profile.json from the setup form
+  POST /api/parse-resume    -> extracts text from an uploaded resume file and
+                               asks the AI backend to structure it, for the
+                               setup form to pre-fill from (never written to
+                               disk directly — the human reviews it first)
   POST /api/resolve-companies -> merges hand-resolved {name,slug,ats} entries
                                into ats_companies, for target companies the
                                automatic match in /api/setup couldn't place
@@ -27,6 +31,7 @@ tailored resume/cover letter — happens in the browser, no CLI required.
 `watch` stays a CLI/cron thing on purpose — it's meant to run for days
 unattended, which isn't something a browser tab should be responsible for.
 """
+import base64
 import json
 import subprocess
 import sys
@@ -39,6 +44,7 @@ import requests
 
 import jobradar as jr
 import match
+import resume
 
 HERE = Path(__file__).parent
 STATIC_ROOTS = ("web", "data", "output", "docs")
@@ -179,6 +185,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._post_test_ai()
             if route == "/api/pull-model":
                 return self._post_pull_model()
+            if route == "/api/parse-resume":
+                return self._post_parse_resume()
         except Exception as e:  # noqa: BLE001 — surface it to the UI, don't crash the server
             import traceback
             traceback.print_exc(file=sys.stderr)
@@ -323,6 +331,56 @@ class Handler(BaseHTTPRequestHandler):
                                  f"not wired to a pollable job board yet — resolve them below, "
                                  f"or edit config.json's ats_companies by hand."
                                  if unmatched else "")})
+
+    # ---- /api/parse-resume -------------------------------------------------
+    def _post_parse_resume(self):
+        """Extracts text from an uploaded resume (.pdf/.docx/.txt) and asks
+        the currently-selected AI backend to structure it into profile.json's
+        schema, so the setup form can pre-fill from it. The frontend treats
+        the result as a starting point to review and edit, never as a final
+        write — no file is ever saved to disk from this endpoint, uploaded
+        bytes are held in memory only for the duration of the request."""
+        body = self._read_json_body()
+        filename = body.get("filename", "")
+        file_b64 = body.get("file_b64", "")
+        if not filename or not file_b64:
+            return self._json(400, {"error": "no file provided"})
+        try:
+            raw_bytes = base64.b64decode(file_b64, validate=True)
+        except Exception:
+            return self._json(400, {"error": "could not decode the uploaded file"})
+        if len(raw_bytes) > 8 * 1024 * 1024:
+            return self._json(200, {"ok": False, "error": "That file is over 8MB — resumes "
+                                    "shouldn't need to be this large. Try a plain-text export."})
+
+        text, err = resume.extract_resume_text(filename, raw_bytes)
+        if err:
+            return self._json(200, {"ok": False, "error": err})
+
+        backend = body.get("ai_backend", "ollama")
+        ai_cfg = {"backend": backend, "model": body.get("ai_model", ""),
+                 "ollama_host": body.get("ollama_host") or "http://localhost:11434"}
+
+        # Same reachability pre-checks as /api/test-ai, so a disconnected backend
+        # degrades to the same plain-language message rather than a raw
+        # ConnectionError/RuntimeError string leaking through parse_resume_text.
+        if backend == "ollama":
+            try:
+                requests.get(f"{ai_cfg['ollama_host'].rstrip('/')}/api/tags", timeout=3).raise_for_status()
+            except requests.exceptions.RequestException:
+                return self._json(200, {"ok": False, "error": "Ollama isn't reachable. Is it "
+                                        "installed and running (`ollama serve`)?"})
+        elif backend in ("anthropic", "openai"):
+            if not jr._ai_api_key(ai_cfg):
+                env_var = "ANTHROPIC_API_KEY" if backend == "anthropic" else "OPENAI_API_KEY"
+                return self._json(200, {"ok": False, "error": f"{env_var} isn't set in the "
+                                        f"environment jobradar is running in."})
+
+        api_key = jr._ai_api_key(ai_cfg)
+        parsed = resume.parse_resume_text(text, ai_cfg, api_key)
+        if parsed.get("error"):
+            return self._json(200, {"ok": False, "error": parsed["error"]})
+        return self._json(200, {"ok": True, "profile": parsed})
 
     # ---- /api/resolve-companies -------------------------------------------
     def _post_resolve_companies(self):

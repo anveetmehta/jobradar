@@ -92,6 +92,13 @@
 <main>
   <form id="f">
 
+    <section id="upload-section">
+      <h2>Upload your resume <span class="opt">optional</span></h2>
+      <p class="hint">Reads a .pdf, .docx, or .txt resume and fills in the fields below for you to review — pick your AI backend further down first if you're not using the default (Ollama). Nothing is saved until you review and click Save at the bottom.</p>
+      <input type="file" id="resume-upload" accept=".pdf,.docx,.txt">
+      <div id="upload-status" style="margin-top:8px;font-size:13px"></div>
+    </section>
+
     <section>
       <h2>Who you are</h2>
       <p class="hint">Used to fill the header of any resume/cover letter you generate. Never sent to an AI backend.</p>
@@ -233,6 +240,35 @@ function addExp(vals = {}) {
 }
 function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
+// Shared by boot()'s pre-fill-from-existing-config and the resume-upload
+// pre-fill — same shape (profile.json's schema) fills the same fields.
+function applyProfileFields(p) {
+  document.getElementById('in-name').value = p.name || '';
+  const ct = p.contact || {};
+  document.getElementById('in-c_location').value = ct.location || '';
+  document.getElementById('in-c_email').value = ct.email || '';
+  document.getElementById('in-c_phone').value = ct.phone || '';
+  document.getElementById('in-c_linkedin').value = ct.linkedin || '';
+  document.getElementById('in-headline').value = p.headline || '';
+  document.getElementById('in-years').value = p.years_experience || '';
+  document.getElementById('in-skills').value = (p.skills || []).join(', ');
+  document.getElementById('in-summary').value = p.summary || '';
+  document.getElementById('in-education').value = (p.education || []).join('\n');
+  document.getElementById('in-certs').value = (p.certifications || []).join('\n');
+  document.getElementById('in-notes').value = p.notes_for_ai || '';
+
+  expList.innerHTML = ''; expCounter = 0;
+  const exps = p.experience || [];
+  if (exps.length) {
+    for (const e of exps) {
+      addExp({ company: e.company, title: e.title,
+               dates: `${e.start||''} to ${e.end||'Present'}`, highlights: e.highlights || [] });
+    }
+  } else {
+    addExp();
+  }
+}
+
 document.getElementById('add-exp').onclick = () => addExp();
 
 // ---- backend picker ----------------------------------------------------
@@ -263,6 +299,46 @@ function selectedModel() {
   if (sel.value === '__other__') return document.getElementById('in-model-custom').value.trim();
   return sel.value;
 }
+
+// ---- resume upload -------------------------------------------------------
+document.getElementById('resume-upload').addEventListener('change', async (ev) => {
+  const file = ev.target.files[0];
+  const statusEl = document.getElementById('upload-status');
+  if (!file) return;
+  if (file.size > 8 * 1024 * 1024) {
+    statusEl.textContent = 'That file is over 8MB — resumes shouldn\'t need to be this large.';
+    ev.target.value = '';
+    return;
+  }
+  statusEl.textContent = `Reading ${file.name} with ${selectedBackend()}…`;
+  try {
+    const buf = await file.arrayBuffer();
+    let binary = '';
+    const bytes = new Uint8Array(buf);
+    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    const file_b64 = btoa(binary);
+    const res = await fetch('/api/parse-resume', { method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ filename: file.name, file_b64, ai_backend: selectedBackend(),
+                             ai_model: selectedModel(), ollama_host: existingOllamaHost || undefined }) });
+    const data = await res.json();
+    if (!data.ok) {
+      statusEl.innerHTML = `Could not parse: ${esc(data.error)}. Check your AI backend below (Ollama running? API key set?), or just fill the form in by hand.`;
+      return;
+    }
+    const overwrite = !document.getElementById('in-name').value.trim() ||
+      confirm('Replace the fields below with what was extracted from your resume? This overwrites anything you\'ve already typed.');
+    if (overwrite) {
+      applyProfileFields(data.profile);
+      statusEl.textContent = `Filled in from ${file.name} — review every field below before saving, extraction can miss or misread things.`;
+    } else {
+      statusEl.textContent = 'Kept your existing entries.';
+    }
+  } catch (err) {
+    statusEl.textContent = `Could not reach the server: ${err.message}`;
+  } finally {
+    ev.target.value = '';
+  }
+});
 function updateBackendUI() {
   const backend = selectedBackend();
   document.querySelectorAll('.backend-card').forEach(c => c.classList.toggle('selected', c.dataset.value === backend));
@@ -466,30 +542,7 @@ async function boot() {
     'Editing your existing setup. Saving will overwrite config.json and profile.json.';
   document.getElementById('submit').textContent = 'Test your connection above first';
 
-  document.getElementById('in-name').value = p.name || '';
-  const ct = p.contact || {};
-  document.getElementById('in-c_location').value = ct.location || '';
-  document.getElementById('in-c_email').value = ct.email || '';
-  document.getElementById('in-c_phone').value = ct.phone || '';
-  document.getElementById('in-c_linkedin').value = ct.linkedin || '';
-  document.getElementById('in-headline').value = p.headline || '';
-  document.getElementById('in-years').value = p.years_experience || '';
-  document.getElementById('in-skills').value = (p.skills || []).join(', ');
-  document.getElementById('in-summary').value = p.summary || '';
-  document.getElementById('in-education').value = (p.education || []).join('\n');
-  document.getElementById('in-certs').value = (p.certifications || []).join('\n');
-  document.getElementById('in-notes').value = p.notes_for_ai || '';
-
-  expList.innerHTML = ''; expCounter = 0;
-  const exps = p.experience || [];
-  if (exps.length) {
-    for (const e of exps) {
-      addExp({ company: e.company, title: e.title,
-               dates: `${e.start||''} to ${e.end||'Present'}`, highlights: e.highlights || [] });
-    }
-  } else {
-    addExp();
-  }
+  applyProfileFields(p);
 
   document.getElementById('in-titles').value = (c.title_include || []).join(', ');
   document.getElementById('in-locs').value = (c.location_filter || []).join(', ');
