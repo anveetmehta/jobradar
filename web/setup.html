@@ -99,6 +99,9 @@
       <div id="upload-status" style="margin-top:8px;font-size:13px"></div>
     </section>
 
+    <div id="details-summary" style="display:none"></div>
+
+    <div id="core-details">
     <section>
       <h2>Who you are</h2>
       <p class="hint">Used to fill the header of any resume/cover letter you generate. Never sent to an AI backend.</p>
@@ -134,8 +137,18 @@
       <textarea id="in-education" name="education" placeholder="MBA, Business Analytics — Your University"></textarea>
       <label for="in-certs">Certifications <span class="opt">optional, one per line</span></label>
       <textarea id="in-certs" name="certifications"></textarea>
-      <label for="in-notes">Notes for the AI <span class="opt">optional — dealbreakers, seniority preference, etc.</span></label>
-      <textarea id="in-notes" name="notes_for_ai"></textarea>
+    </section>
+    </div>
+
+    <section id="beyond-resume-section">
+      <h2>Beyond your resume <span class="opt">optional, but this is what a resume can't tell us</span></h2>
+      <p class="hint">A resume shows what you did — this is for the things that don't fit on one, and matter just as much for a good match.</p>
+      <label for="in-extra-skills">Skills you'd leave off a resume <span class="opt">comma separated — tools, languages, anything you're genuinely competent in but didn't list above</span></label>
+      <input type="text" id="in-extra-skills" name="extra_skills" placeholder="figma, sql, public speaking">
+      <label for="in-side-projects">Side projects or things you've built <span class="opt">one per line — open source, personal projects, anything outside your day job</span></label>
+      <textarea id="in-side-projects" name="side_projects" placeholder="Built an AI-matched job search tool, open source on GitHub"></textarea>
+      <label for="in-notes">What are you looking for, and why? <span class="opt">motivation, dealbreakers, seniority preference — whatever a job title alone won't capture</span></label>
+      <textarea id="in-notes" name="notes_for_ai" placeholder="e.g. Looking for more ownership after 2 years as an IC. Not interested in pure growth-marketing roles. A stated minimum years-of-experience more than 2 years above mine is a real gap, not something to smooth over."></textarea>
     </section>
 
     <section>
@@ -255,6 +268,7 @@ function applyProfileFields(p) {
   document.getElementById('in-summary').value = p.summary || '';
   document.getElementById('in-education').value = (p.education || []).join('\n');
   document.getElementById('in-certs').value = (p.certifications || []).join('\n');
+  document.getElementById('in-side-projects').value = (p.side_projects || []).join('\n');
   document.getElementById('in-notes').value = p.notes_for_ai || '';
 
   expList.innerHTML = ''; expCounter = 0;
@@ -270,6 +284,31 @@ function applyProfileFields(p) {
 }
 
 document.getElementById('add-exp').onclick = () => addExp();
+
+// A resume already answered "who you are" and "your background" — no need
+// to make the user re-read every field back to us. Collapse those two
+// sections into a one-line summary with an escape hatch, right after a
+// successful parse fills them in. Never used for the pre-fill-from-existing-
+// config path in boot() — someone who navigated here to edit their saved
+// setup wants to see the fields, not a summary of them.
+function showDetailsSummary(p, filename) {
+  const el = document.getElementById('details-summary');
+  el.innerHTML = `
+    <section>
+      <h2>Extracted from ${esc(filename)}</h2>
+      <p class="hint">${esc(p.name || '(no name found)')} — ${esc(p.headline || 'no headline found')}<br>
+        ${p.years_experience || 0} years experience · ${(p.skills||[]).length} skill(s) · ${(p.experience||[]).length} role(s) listed</p>
+      <p class="hint" style="margin-top:6px">Double-check this before saving — extraction can miss or misread things.</p>
+      <button type="button" class="btn-secondary" id="edit-details-btn">Edit these details</button>
+    </section>
+  `;
+  el.style.display = '';
+  document.getElementById('core-details').style.display = 'none';
+  document.getElementById('edit-details-btn').addEventListener('click', () => {
+    el.style.display = 'none';
+    document.getElementById('core-details').style.display = '';
+  });
+}
 
 // ---- backend picker ----------------------------------------------------
 const cloudModels = {
@@ -329,7 +368,8 @@ document.getElementById('resume-upload').addEventListener('change', async (ev) =
       confirm('Replace the fields below with what was extracted from your resume? This overwrites anything you\'ve already typed.');
     if (overwrite) {
       applyProfileFields(data.profile);
-      statusEl.textContent = `Filled in from ${file.name} — review every field below before saving, extraction can miss or misread things.`;
+      showDetailsSummary(data.profile, file.name);
+      statusEl.textContent = '';
     } else {
       statusEl.textContent = 'Kept your existing entries.';
     }
@@ -575,6 +615,15 @@ function splitLines(id) {
 function splitCommas(id) {
   return (document.getElementById(id).value || '').split(',').map(s => s.trim()).filter(Boolean);
 }
+function mergedSkills() {
+  const base = splitCommas('in-skills');
+  const extra = splitCommas('in-extra-skills');
+  const seen = new Set(base.map(s => s.toLowerCase()));
+  for (const s of extra) {
+    if (!seen.has(s.toLowerCase())) { base.push(s); seen.add(s.toLowerCase()); }
+  }
+  return base;
+}
 
 document.getElementById('f').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -621,10 +670,11 @@ document.getElementById('f').addEventListener('submit', async (e) => {
     headline: document.getElementById('in-headline').value,
     years_experience: Number(document.getElementById('in-years').value) || 0,
     summary: document.getElementById('in-summary').value,
-    skills: splitCommas('in-skills'),
+    skills: mergedSkills(),
     experience,
     education: splitLines('in-education'),
     certifications: splitLines('in-certs'),
+    side_projects: splitLines('in-side-projects'),
     notes_for_ai: document.getElementById('in-notes').value,
     title_include: splitCommas('in-titles'),
     location_filter: splitCommas('in-locs'),

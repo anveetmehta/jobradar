@@ -88,12 +88,28 @@ reason and can just fill the form in by hand instead.
 
 Below that: name, contact details (used only to render the resume/cover-letter
 header — never sent to an AI backend), headline, years of experience, skills,
-work history with concrete highlights, education, certifications, and a
-free-text notes field the AI weighs directly (state dealbreakers, seniority
-preference, "flag it if the role wants N+ years more than I have," etc.). If
-you leave an experience entry with highlights but no company/title filled
-in, submission is blocked with an inline error rather than silently dropping
-that entry.
+work history with concrete highlights, education, and certifications. If you
+leave an experience entry with highlights but no company/title filled in,
+submission is blocked with an inline error rather than silently dropping
+that entry. Once a resume is successfully parsed, this whole block collapses
+into a one-line summary ("Jordan Rivera — Senior PM, 8 years, 3 roles") with
+an **Edit these details** link — you're not asked to re-check every field
+one by one, but everything stays reachable if you want to.
+
+**1b. Beyond your resume.** Right after that, a section for the things a
+resume genuinely can't show:
+- **Skills you'd leave off a resume** — comma-separated, merged into your
+  main skills list on save (deduplicated, case-insensitive).
+- **Side projects or things you've built** — one per line; open source, side
+  projects, anything outside the day job. This is real, citable profile
+  content, not decoration — it's fed to the AI alongside your work
+  experience, so it can genuinely count toward a job's fit score, and the
+  fabrication-guard treats it as legitimate material a tailored cover letter
+  can reference.
+- **What are you looking for, and why?** — replaces the old generic "notes
+  for the AI" box; motivation, dealbreakers, seniority preference, whatever
+  a job title alone won't capture. Same field as `notes_for_ai` under the
+  hood, already fed to every AI call.
 
 **2. What you're looking for.** Location filter, job-title include/exclude
 terms, and a list of target companies. Target companies are matched
@@ -298,6 +314,7 @@ fields — see that file for the annotated schema if editing by hand):
 | `skills` | the ground truth `tailor` hard-filters generated content against |
 | `experience[]` | `company`, `title`, `start`, `end`, `highlights[]` — your real bullets; `tailor` selects/reorders/tightens these, never invents new ones |
 | `education`, `certifications` | as printed |
+| `side_projects[]` | things a resume wouldn't show — open source, personal projects. Fed to the AI like experience; a legitimate source a tailored cover letter can cite |
 | `notes_for_ai` | free text the AI weighs directly — dealbreakers, seniority preference, how to treat an experience-requirement gap, etc. |
 
 **Match quality is only as honest as what you put here** — the model is

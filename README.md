@@ -119,15 +119,26 @@ hand-edited. The setup page can also **upload an existing resume** (PDF,
 DOCX, or plain text) and use your chosen AI backend to extract a starting
 point into the form fields — nothing is saved until you review and correct
 it yourself; a fabricated field here is just as serious as one in a tailored
-resume, so treat the extraction as a draft, not a fact. `profile.json` is a
-JSON description of your real background —
-headline, years of experience, skills, work history with concrete
-highlights, and any free-text notes you want the AI to weigh (dealbreakers,
-seniority preference, "flag it if the role wants N+ years more than I
-have"). See `examples/profile.example.json` for the schema if editing by
-hand. **The match quality is only as honest as what you put here** — the
-model is instructed not to invent anything beyond it, so a thin profile
-produces thin, low-confidence scoring.
+resume, so treat the extraction as a draft, not a fact. Once a resume is
+parsed, the "who you are"/"your background" fields collapse into a one-line
+summary with an edit link, instead of asking you to re-check every field —
+you're not asked to re-type what the resume already told us.
+
+Right below that, a **"Beyond your resume"** section asks the things a
+resume genuinely can't show: skills you'd leave off it, side projects or
+things you've built outside your day job, and what you're actually looking
+for and why. These aren't just stored for display — `side_projects` and
+your notes are fed to the AI alongside everything else, so job-fit scoring
+and tailoring can actually use them.
+
+`profile.json` is a JSON description of your real background — headline,
+years of experience, skills, work history with concrete highlights, and any
+free-text notes you want the AI to weigh (dealbreakers, seniority
+preference, "flag it if the role wants N+ years more than I have"). See
+`examples/profile.example.json` for the schema if editing by hand. **The
+match quality is only as honest as what you put here** — the model is
+instructed not to invent anything beyond it, so a thin profile produces
+thin, low-confidence scoring.
 
 ## Tailoring a resume and cover letter
 

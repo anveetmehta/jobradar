@@ -47,6 +47,8 @@ def _profile_vocabulary(profile):
         for h in e.get("highlights", []):
             vocab |= _tokens(h)
         vocab |= _tokens(e.get("title", ""))
+    for s in profile.get("side_projects", []):
+        vocab |= _tokens(s)
     vocab |= _tokens(profile.get("summary", ""))
     return vocab
 

@@ -320,6 +320,7 @@ class Handler(BaseHTTPRequestHandler):
             "experience": body.get("experience", []),
             "education": [s.strip() for s in body.get("education", []) if s.strip()],
             "certifications": [s.strip() for s in body.get("certifications", []) if s.strip()],
+            "side_projects": [s.strip() for s in body.get("side_projects", []) if s.strip()],
             "notes_for_ai": body.get("notes_for_ai", ""),
         }
         (HERE / "profile.json").write_text(json.dumps(profile, indent=2))

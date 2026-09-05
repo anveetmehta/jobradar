@@ -106,6 +106,9 @@ def profile_to_text(p):
             lines.append(f"  - {h}")
     if p.get("education"):
         lines.append("\nEducation: " + "; ".join(p["education"]))
+    if p.get("side_projects"):
+        lines.append("\nSide projects (outside day-job experience): "
+                     + "; ".join(p["side_projects"]))
     if p.get("notes_for_ai"):
         lines.append(f"\nCandidate notes: {p['notes_for_ai']}")
     return "\n".join(lines)
